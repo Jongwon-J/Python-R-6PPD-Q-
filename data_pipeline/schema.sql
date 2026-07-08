@@ -28,17 +28,29 @@ CREATE INDEX IF NOT EXISTS idx_weather_raw_nx_ny ON weather_raw (nx, ny);
 
 -- ----------------------------------------------------------------------------
 -- 2) road_master : 도로 마스터 데이터
+--    tancheon_week2_final.csv 컬럼(도로ID,도로명,행정동,소속구,도로연장_km,차선수,
+--    AADT_대일_평일,불투수면비율_퍼센트,기준년도,출처_AADT,출처_불투수면)을 그대로 반영.
+--    lat/lon/nx/ny는 geocode_and_import_road_master.py가 CSV를 적재한 "이후"
+--    지오코딩으로 채우는 값이라 처음엔 NULL일 수 있음 (그래서 NOT NULL 아님).
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS road_master (
     road_id             VARCHAR(50) PRIMARY KEY,
-    road_name           VARCHAR(200),
-    lat                 NUMERIC(9,6) NOT NULL,
-    lon                 NUMERIC(9,6) NOT NULL,
-    nx                  SMALLINT,               -- 기상 격자와 조인하기 위해 미리 계산해서 저장 (dfs_xy_conv 사용)
-    ny                  SMALLINT,
-    aadt                INTEGER,                -- 연평균 일교통량(AADT)
+    road_name           VARCHAR(200) NOT NULL,
+    dong                VARCHAR(100),           -- 행정동 (지오코딩 입력 주소로 사용)
+    gu                  VARCHAR(50),            -- 소속구
+    road_length_km      NUMERIC(6,3),           -- 도로연장(km)
+    lane_count          SMALLINT,               -- 차선수
+    aadt                INTEGER,                -- 연평균 일교통량(AADT, 대/일)
     impervious_ratio    NUMERIC(5,2),           -- 인근 불투수면적 비율(%)
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    reference_year      SMALLINT,               -- AADT/불투수면 기준년도
+    source_aadt         VARCHAR(200),           -- AADT 출처
+    source_impervious   VARCHAR(200),           -- 불투수면 출처
+    lat                 NUMERIC(9,6),           -- 지오코딩 결과 위도
+    lon                 NUMERIC(9,6),           -- 지오코딩 결과 경도
+    nx                  SMALLINT,               -- 기상 격자와 조인하기 위해 계산해서 저장 (dfs_xy_conv 사용)
+    ny                  SMALLINT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_road_master_nx_ny ON road_master (nx, ny);
@@ -58,7 +70,9 @@ CREATE TABLE IF NOT EXISTS dry_days_status (
 );
 
 -- ----------------------------------------------------------------------------
--- 4) processed_risk_log : 3주차에 채워질 최종 위험도 테이블
+-- 4) processed_risk_log : 위험도 산식(risk_formula.py) 계산 결과
+--    aadt_norm ~ runoff_index는 최종 risk_score만 남기지 않고 중간값도 같이 저장해서,
+--    "왜 이 점수가 나왔는지" 나중에 디버깅/검증할 수 있게 함.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS processed_risk_log (
     id                  BIGSERIAL PRIMARY KEY,
@@ -68,8 +82,15 @@ CREATE TABLE IF NOT EXISTS processed_risk_log (
     antecedent_dry_days  INTEGER,
     aadt                 INTEGER,
     impervious_ratio     NUMERIC(5,2),
+    aadt_norm             NUMERIC(6,4),
+    dry_days_norm         NUMERIC(6,4),
+    rain_trigger          NUMERIC(6,4),
+    impervious_norm       NUMERIC(6,4),
+    load_index             NUMERIC(6,4),
+    runoff_index            NUMERIC(6,4),
     risk_score            NUMERIC(5,2),          -- 0~100
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (road_id, calc_datetime)
 );
 
 CREATE INDEX IF NOT EXISTS idx_processed_risk_log_calc_datetime ON processed_risk_log (calc_datetime);

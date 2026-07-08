@@ -146,6 +146,24 @@ def run_daily(nx: int, ny: int):
     target_date = date.today() - timedelta(days=1)
     run_backfill(nx, ny, target_date, target_date)
 
+
+def get_all_road_grid_points() -> List[Tuple[int, int]]:
+    """
+    road_master에 지오코딩된 도로들이 흩어져 있는 서로 다른 모든 격자(nx, ny) 목록을 반환합니다.
+    도로마다 위치(격자)가 다르므로, 무강우일수도 각 도로의 격자별로 따로 계산해야
+    etl_risk_pipeline.py가 모든 도로에 대해 값을 찾을 수 있습니다.
+    road_master가 비어 있으면 빈 리스트를 반환합니다 (호출부에서 --nx/--ny 폴백 처리).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT nx, ny FROM road_master WHERE nx IS NOT NULL AND ny IS NOT NULL"
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
 """실행부"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="선행 무강우일수(ADD) 계산")
@@ -156,7 +174,18 @@ if __name__ == "__main__":
     parser.add_argument("--ny", type=int, default=int(os.environ.get("TANCHEON_NY", "123")))
     args = parser.parse_args()
 
-    if args.mode == "backfill":
-        run_backfill(args.nx, args.ny, args.start_date, args.end_date)
+    grid_points = get_all_road_grid_points()
+    if not grid_points:
+        logger.warning(
+            "road_master가 비어 있어 --nx/--ny(.env TANCHEON_NX/NY) 지점 하나만 계산합니다. "
+            "geocode_and_import_road_master.py 실행 후 다시 돌리면 도로별 격자를 자동으로 잡습니다."
+        )
+        grid_points = [(args.nx, args.ny)]
     else:
-        run_daily(args.nx, args.ny)
+        logger.info(f"road_master 기준 대상 격자 {len(grid_points)}개: {grid_points}")
+
+    for nx, ny in grid_points:
+        if args.mode == "backfill":
+            run_backfill(nx, ny, args.start_date, args.end_date)
+        else:
+            run_daily(nx, ny)

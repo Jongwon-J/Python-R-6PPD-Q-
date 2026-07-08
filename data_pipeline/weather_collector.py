@@ -141,8 +141,9 @@ def _to_float(v, default=None):
         return default
 
 
-def save_to_db(nx: int, ny: int, base_date: str, base_time: str, obs_dt: datetime, values: Dict[str, str]):
-    """weather_raw 테이블에 적재. 동일 (nx, ny, obs_datetime) 재수집 시 UPSERT."""
+def save_to_db(conn, nx: int, ny: int, base_date: str, base_time: str, obs_dt: datetime, values: Dict[str, str]):
+    """weather_raw 테이블에 적재. 동일 (nx, ny, obs_datetime) 재수집 시 UPSERT.
+    conn을 인자로 받아서, 여러 지점을 순회할 때 매번 새로 접속하지 않고 하나의 커넥션을 재사용합니다."""
     rn1_mm = _to_float(values.get("RN1"), default=0.0)
 
     sql = """
@@ -158,35 +159,73 @@ def save_to_db(nx: int, ny: int, base_date: str, base_time: str, obs_dt: datetim
             wsd_ms = EXCLUDED.wsd_ms,
             raw_payload = EXCLUDED.raw_payload;
     """
-    conn = psycopg2.connect(**DB_CONFIG) # DB에 연결
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute(sql, (
-                nx, ny, base_date, base_time, obs_dt,
-                rn1_mm,
-                int(_to_float(values.get("PTY"), default=0)),
-                _to_float(values.get("T1H")),
-                _to_float(values.get("REH")),
-                _to_float(values.get("WSD")),
-                json.dumps(values, ensure_ascii=False),
-            ))
-        logger.info(f"저장 완료: {obs_dt} nx={nx} ny={ny} RN1={rn1_mm}mm PTY={values.get('PTY')}")
-    finally:
-        conn.close()
+    with conn, conn.cursor() as cur:
+        cur.execute(sql, (
+            nx, ny, base_date, base_time, obs_dt,
+            rn1_mm,
+            int(_to_float(values.get("PTY"), default=0)),
+            _to_float(values.get("T1H")),
+            _to_float(values.get("REH")),
+            _to_float(values.get("WSD")),
+            json.dumps(values, ensure_ascii=False),
+        ))
+    logger.info(f"저장 완료: {obs_dt} nx={nx} ny={ny} RN1={rn1_mm}mm PTY={values.get('PTY')}")
+
+
+def get_target_grid_points(conn) -> Dict[str, Dict[str, int]]:
+    """
+    수집 대상 격자 목록을 결정합니다.
+
+    road_master에 지오코딩된 도로가 있으면, 그 도로들이 실제로 흩어져 있는 "서로 다른 모든 격자"를
+    수집 대상으로 삼습니다 (도로마다 nx,ny가 다르면 위험도 계산 시 각자 자기 격자의 날씨가 필요하기
+    때문 — .env의 TANCHEON_TARGET_POINT 하나로 고정하면 그 지점과 격자가 다른 도로는 영원히
+    날씨 데이터를 못 받습니다).
+
+    road_master가 아직 비어 있으면(초기 테스트 단계), .env의 TANCHEON_TARGET_POINT 하나만
+    폴백으로 사용합니다.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT nx, ny FROM road_master WHERE nx IS NOT NULL AND ny IS NOT NULL"
+        )
+        rows = cur.fetchall()
+
+    if rows:
+        return {f"road_grid_{nx}_{ny}": {"nx": nx, "ny": ny} for nx, ny in rows}
+
+    if TARGET_POINT not in TANCHEON_POINTS:
+        raise ValueError(f"알 수 없는 TANCHEON_TARGET_POINT: {TARGET_POINT}")
+    point = TANCHEON_POINTS[TARGET_POINT]
+    logger.warning(
+        "road_master가 비어 있어 .env의 TANCHEON_TARGET_POINT 하나만 수집합니다. "
+        "geocode_and_import_road_master.py 실행 후 다시 돌리면 도로별 격자를 자동으로 잡습니다."
+    )
+    return {TARGET_POINT: {"nx": point["nx"], "ny": point["ny"]}}
 
 
 def run():
-    if TARGET_POINT not in TANCHEON_POINTS:
-        raise ValueError(f"알 수 없는 TANCHEON_TARGET_POINT: {TARGET_POINT}")
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        target_points = get_target_grid_points(conn)
+        base_date, base_time, obs_dt = get_base_datetime()
+        logger.info(f"조회 시작: base_date={base_date} base_time={base_time} 대상 격자 {len(target_points)}개")
 
-    point = TANCHEON_POINTS[TARGET_POINT]
-    nx, ny = point["nx"], point["ny"]
+        failures = []
+        for name, point in target_points.items():
+            nx, ny = point["nx"], point["ny"]
+            try:
+                values = fetch_ultra_srt_ncst(nx, ny, base_date, base_time)
+                save_to_db(conn, nx, ny, base_date, base_time, obs_dt, values)
+            except Exception as e:
+                logger.error(f"{name}(nx={nx}, ny={ny}) 수집 실패: {e}")
+                failures.append(name)
+            time.sleep(0.2)  # KMA API 호출 간격
 
-    base_date, base_time, obs_dt = get_base_datetime()
-    logger.info(f"조회 시작: point={TARGET_POINT} base_date={base_date} base_time={base_time} nx={nx} ny={ny}")
-
-    values = fetch_ultra_srt_ncst(nx, ny, base_date, base_time)
-    save_to_db(nx, ny, base_date, base_time, obs_dt, values)
+        if failures:
+            logger.warning(f"수집 실패한 격자: {failures}")
+        logger.info(f"수집 완료: 성공 {len(target_points) - len(failures)}개 / 전체 {len(target_points)}개")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

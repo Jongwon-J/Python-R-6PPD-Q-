@@ -94,3 +94,21 @@ CREATE TABLE IF NOT EXISTS processed_risk_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_processed_risk_log_calc_datetime ON processed_risk_log (calc_datetime);
+
+-- ----------------------------------------------------------------------------
+-- 5) citizen_reports : 시민 제보 (3주차, 백엔드 담당)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS citizen_reports (
+    id              BIGSERIAL PRIMARY KEY,
+    lat             NUMERIC(9,6) NOT NULL,      -- 제보 위치 위도
+    lon             NUMERIC(9,6) NOT NULL,      -- 제보 위치 경도
+    description     TEXT,                       -- 시민이 작성한 제보 내용
+    image_path      VARCHAR(500),                -- 업로드된 사진 저장 경로
+    road_id         VARCHAR(50) REFERENCES road_master(road_id),  -- 인근 도로 매칭 (nullable)
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',       -- pending / reviewed / resolved
+    reported_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_citizen_reports_reported_at ON citizen_reports (reported_at);
+CREATE INDEX IF NOT EXISTS idx_citizen_reports_status ON citizen_reports (status);

@@ -112,3 +112,16 @@ CREATE TABLE IF NOT EXISTS citizen_reports (
 
 CREATE INDEX IF NOT EXISTS idx_citizen_reports_reported_at ON citizen_reports (reported_at);
 CREATE INDEX IF NOT EXISTS idx_citizen_reports_status ON citizen_reports (status);
+
+-- ----------------------------------------------------------------------------
+-- 6) subscriptions : 관심 도로/하천 알림 구독 (4주차, 백엔드 담당)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id              BIGSERIAL PRIMARY KEY,
+    contact         VARCHAR(100) NOT NULL,      -- 전화번호 또는 이메일
+    road_id         VARCHAR(50) NOT NULL REFERENCES road_master(road_id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (contact, road_id)                   -- 같은 연락처가 같은 도로를 중복 구독하지 못하게
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_road_id ON subscriptions (road_id);

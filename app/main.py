@@ -1,10 +1,12 @@
 from fastapi import FastAPI
-from app.routers import traffic, reports
+from app.routers import traffic, reports, risk, subscriptions
 
 app = FastAPI(title="EcoBridge-6PPDQ Backend")
 
 app.include_router(traffic.router)
 app.include_router(reports.router)
+app.include_router(risk.router)
+app.include_router(subscriptions.router)
 
 @app.get("/health")
 def health_check():

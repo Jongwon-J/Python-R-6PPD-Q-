@@ -29,3 +29,13 @@ class ReportListItem(BaseModel):
     description: Optional[str] = None
     status: str
     reported_at: datetime
+    
+class SubscriptionResponse(BaseModel):
+    """구독 생성 후 응답 형태"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    contact: str
+    road_id: str
+    created_at: datetime

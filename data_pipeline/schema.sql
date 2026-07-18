@@ -101,7 +101,38 @@ CREATE INDEX IF NOT EXISTS idx_processed_risk_log_calc_datetime ON processed_ris
 ALTER TABLE processed_risk_log ADD COLUMN IF NOT EXISTS risk_grade VARCHAR(10);
 
 -- ----------------------------------------------------------------------------
--- 5) risk_alert_log : 위험도 등급이 상승(임계치 도달)한 순간을 기록하는 트리거 로그
+-- 5) citizen_reports : 시민 제보 (3주차, 백엔드 담당)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS citizen_reports (
+    id              BIGSERIAL PRIMARY KEY,
+    lat             NUMERIC(9,6) NOT NULL,      -- 제보 위치 위도
+    lon             NUMERIC(9,6) NOT NULL,      -- 제보 위치 경도
+    description     TEXT,                       -- 시민이 작성한 제보 내용
+    image_path      VARCHAR(500),                -- 업로드된 사진 저장 경로
+    road_id         VARCHAR(50) REFERENCES road_master(road_id),  -- 인근 도로 매칭 (nullable)
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',       -- pending / reviewed / resolved
+    reported_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_citizen_reports_reported_at ON citizen_reports (reported_at);
+CREATE INDEX IF NOT EXISTS idx_citizen_reports_status ON citizen_reports (status);
+
+-- ----------------------------------------------------------------------------
+-- 6) subscriptions : 관심 도로/하천 알림 구독 (4주차, 백엔드 담당)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id              BIGSERIAL PRIMARY KEY,
+    contact         VARCHAR(100) NOT NULL,      -- 전화번호 또는 이메일
+    road_id         VARCHAR(50) NOT NULL REFERENCES road_master(road_id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (contact, road_id)                   -- 같은 연락처가 같은 도로를 중복 구독하지 못하게
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_road_id ON subscriptions (road_id);
+
+-- ----------------------------------------------------------------------------
+-- 7) risk_alert_log : 위험도 등급이 상승(임계치 도달)한 순간을 기록하는 트리거 로그
 --    (CrewAI 자동 트리거 파이프라인이 "무엇을 보고 발동했는지" 추적하기 위한 테이블)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_alert_log (

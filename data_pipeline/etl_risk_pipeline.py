@@ -43,6 +43,9 @@ DB_CONFIG = {
 # 최근 몇 시간까지 거슬러 올라가며 연속 강우 이벤트를 찾을지 (하루면 충분하다고 가정)
 RAIN_LOOKBACK_HOURS = 24
 
+# 등급 순위 (임계치 트리거 판정용). risk_formula.RISK_GRADE_BOUNDARIES와 순서를 맞춰야 함.
+GRADE_RANK = {"관심": 0, "주의": 1, "경계": 2, "심각": 3}
+
 
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
@@ -51,6 +54,14 @@ def get_conn():
 def get_aadt_sample_range(cur) -> Tuple[float, float]:
     """road_master 표본 내 AADT 최소/최대값 (정규화 기준)."""
     cur.execute("SELECT MIN(aadt), MAX(aadt) FROM road_master WHERE aadt IS NOT NULL")
+    row = cur.fetchone()
+    return float(row[0]), float(row[1])
+
+
+def get_impervious_sample_range(cur) -> Tuple[float, float]:
+    """road_master 표본 내 불투수면비율 최소/최대값 (정규화 기준).
+    불투수면 정규화를 값/100 절대 스케일에서 표본 상대 min-max로 바꾸면서 추가됨."""
+    cur.execute("SELECT MIN(impervious_ratio), MAX(impervious_ratio) FROM road_master WHERE impervious_ratio IS NOT NULL")
     row = cur.fetchone()
     return float(row[0]), float(row[1])
 
@@ -131,8 +142,9 @@ def upsert_risk_log(cur, road_id: str, calc_datetime: datetime, rn1_mm: Optional
     sql = """
         INSERT INTO processed_risk_log
             (road_id, calc_datetime, rn1_mm, antecedent_dry_days, aadt, impervious_ratio,
-             aadt_norm, dry_days_norm, rain_trigger, impervious_norm, load_index, runoff_index, risk_score)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             aadt_norm, dry_days_norm, rain_trigger, impervious_norm, load_index, runoff_index,
+             risk_score, risk_grade)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (road_id, calc_datetime)
         DO UPDATE SET
             rn1_mm = EXCLUDED.rn1_mm,
@@ -143,25 +155,62 @@ def upsert_risk_log(cur, road_id: str, calc_datetime: datetime, rn1_mm: Optional
             impervious_norm = EXCLUDED.impervious_norm,
             load_index = EXCLUDED.load_index,
             runoff_index = EXCLUDED.runoff_index,
-            risk_score = EXCLUDED.risk_score;
+            risk_score = EXCLUDED.risk_score,
+            risk_grade = EXCLUDED.risk_grade;
     """
     cur.execute(sql, (
         road_id, calc_datetime, rn1_mm, antecedent_dry_days, aadt, impervious_ratio,
         result["aadt_norm"], result["dry_days_norm"], result["rain_trigger"], result["impervious_norm"],
-        result["load_index"], result["runoff_index"], result["risk_score"],
+        result["load_index"], result["runoff_index"], result["risk_score"], result["risk_grade"],
     ))
+
+
+def get_previous_risk_grade(cur, road_id: str, before_datetime: datetime) -> Optional[str]:
+    """해당 도로의 이번 계산 시각(before_datetime)보다 앞선 가장 최근 등급. 없으면 None(최초 계산)."""
+    cur.execute(
+        """
+        SELECT risk_grade FROM processed_risk_log
+        WHERE road_id = %s AND calc_datetime < %s AND risk_grade IS NOT NULL
+        ORDER BY calc_datetime DESC LIMIT 1
+        """,
+        (road_id, before_datetime),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def maybe_log_alert(cur, road_id: str, calc_datetime: datetime, prev_grade: Optional[str],
+                     new_grade: str, risk_score: float) -> bool:
+    """
+    등급이 "상승"한 경우에만 risk_alert_log에 기록하고 True를 반환.
+    직전 기록이 없는 최초 계산은 비교 대상이 없으므로 트리거하지 않음(백필 시 노이즈 방지).
+    """
+    if prev_grade is None:
+        return False
+    if GRADE_RANK.get(new_grade, 0) <= GRADE_RANK.get(prev_grade, 0):
+        return False
+
+    cur.execute(
+        """
+        INSERT INTO risk_alert_log (road_id, calc_datetime, prev_grade, new_grade, risk_score)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (road_id, calc_datetime, prev_grade, new_grade, risk_score),
+    )
+    return True
 
 
 def run():
     conn = get_conn()
-    processed, skipped = 0, 0
+    processed, skipped, alerts = 0, 0, 0
     try:
         with conn, conn.cursor() as cur:
             aadt_min, aadt_max = get_aadt_sample_range(cur)
+            impervious_min, impervious_max = get_impervious_sample_range(cur)
             roads = get_roads(cur)
             if not roads:
-                logger.warning("road_master에 위험도 계산 가능한(지오코딩 완료된) 도로가 없습니다. "
-                                "geocode_and_import_road_master.py를 먼저 실행하세요.")
+                logger.warning("road_master에 위험도 계산 가능한 도로가 없습니다. "
+                                "import_gis_road_master.py(또는 geocode_and_import_road_master.py)를 먼저 실행하세요.")
                 return
 
             for road in roads:
@@ -187,21 +236,39 @@ def run():
                     antecedent_dry_days=antecedent_dry_days,
                     is_raining=is_raining,
                     impervious_ratio_pct=float(road["impervious_ratio"]),
+                    impervious_sample_min=impervious_min,
+                    impervious_sample_max=impervious_max,
                     cumulative_mm_since_rain_start=cum_mm,
                     hours_since_rain_start=hours_since_start,
                 )
+
+                prev_grade = get_previous_risk_grade(cur, road["road_id"], obs_dt)
 
                 upsert_risk_log(
                     cur, road["road_id"], obs_dt, rn1_mm, antecedent_dry_days,
                     road["aadt"], float(road["impervious_ratio"]), result,
                 )
+
+                triggered = maybe_log_alert(
+                    cur, road["road_id"], obs_dt, prev_grade, result["risk_grade"], result["risk_score"],
+                )
+                if triggered:
+                    alerts += 1
+                    logger.warning(
+                        f"[ALERT] {road['road_id']} {road['road_name']}: "
+                        f"{prev_grade} -> {result['risk_grade']} (risk_score={result['risk_score']})"
+                    )
+
                 logger.info(
                     f"{road['road_id']} {road['road_name']}: risk_score={result['risk_score']} "
-                    f"(is_raining={is_raining}, ADD={antecedent_dry_days}, rn1={rn1_mm})"
+                    f"grade={result['risk_grade']} (is_raining={is_raining}, ADD={antecedent_dry_days}, rn1={rn1_mm})"
                 )
                 processed += 1
 
-        logger.info(f"ETL 완료: 처리 {processed}건, 건너뜀 {skipped}건 (표본 AADT 범위 {aadt_min}~{aadt_max})")
+        logger.info(
+            f"ETL 완료: 처리 {processed}건, 건너뜀 {skipped}건, 등급 상승 트리거 {alerts}건 "
+            f"(표본 AADT 범위 {aadt_min}~{aadt_max})"
+        )
     finally:
         conn.close()
 

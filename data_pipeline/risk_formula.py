@@ -31,9 +31,14 @@ def normalize_dry_days(antecedent_dry_days: int, cap_days: int = 7) -> float:
     return max(0.0, min(1.0, value))
 
 
-def normalize_impervious(impervious_ratio_pct: float) -> float:
-    """불투수면비율(%, 0~100)을 0~1 정규화: (값-0)/(100-0). 자치구 단위 값을 그대로 사용."""
-    value = impervious_ratio_pct / 100.0
+def normalize_impervious(impervious_ratio_pct: float, sample_min: float, sample_max: float) -> float:
+    """
+    불투수면비율을 표본 내 min-max로 0~1 정규화. 공식 : (값-표본min)/(표본max-표본min)
+    sample_min/sample_max는 road_master 표본에서 추출
+    """
+    if sample_max <= sample_min:
+        return 0.0
+    value = (impervious_ratio_pct - sample_min) / (sample_max - sample_min)
     return max(0.0, min(1.0, value))
 
 
@@ -74,6 +79,30 @@ def calculate_risk_score(load_index: float, runoff_index: float) -> float:
     return round(load_index * runoff_index * 100, 2)
 
 
+# 4단계 등급 경계값. 윤서가 15개 도로 표본 위험도 분포를 검증해 확정한 값 (Week3 검증 과정 2-3).
+RISK_GRADE_BOUNDARIES = (33.5, 40.5, 49.9)  # (관심/주의 경계, 주의/경계 경계, 경계/심각 경계)
+
+
+def classify_risk_grade(risk_score: float) -> str:
+    """
+    위험도 점수를 4단계 등급으로 분류.
+        관심 : risk_score <  33.5
+        주의 : 33.5 <= risk_score <  40.5
+        경계 : 40.5 <= risk_score <  49.9
+        심각 : risk_score >= 49.9
+    임계치 트리거 파이프라인(etl_risk_pipeline.py)은 이 등급이 이전 계산값보다 올라갔는지를
+    비교해서 알림을 발생시키는 데 사용합니다.
+    """
+    warn, alert, severe = RISK_GRADE_BOUNDARIES
+    if risk_score >= severe:
+        return "심각"
+    if risk_score >= alert:
+        return "경계"
+    if risk_score >= warn:
+        return "주의"
+    return "관심"
+
+
 def calculate_full_risk(
     aadt: float,
     aadt_sample_min: float,
@@ -81,6 +110,8 @@ def calculate_full_risk(
     antecedent_dry_days: int,
     is_raining: bool,
     impervious_ratio_pct: float,
+    impervious_sample_min: float,
+    impervious_sample_max: float,
     cumulative_mm_since_rain_start: float = 0.0,
     hours_since_rain_start: float = 0.0,
 ) -> dict:
@@ -91,11 +122,12 @@ def calculate_full_risk(
     aadt_norm = normalize_aadt(aadt, aadt_sample_min, aadt_sample_max)
     dry_days_norm = normalize_dry_days(antecedent_dry_days)
     rain_trigger_value = rainfall_trigger(is_raining, cumulative_mm_since_rain_start, hours_since_rain_start)
-    impervious_norm = normalize_impervious(impervious_ratio_pct)
+    impervious_norm = normalize_impervious(impervious_ratio_pct, impervious_sample_min, impervious_sample_max)
 
     load_index = calculate_load_index(aadt_norm, dry_days_norm)
     runoff_index = calculate_runoff_index(rain_trigger_value, impervious_norm)
     risk_score = calculate_risk_score(load_index, runoff_index)
+    risk_grade = classify_risk_grade(risk_score)
 
     return {
         "aadt_norm": round(aadt_norm, 4),
@@ -105,22 +137,25 @@ def calculate_full_risk(
         "load_index": round(load_index, 4),
         "runoff_index": round(runoff_index, 4),
         "risk_score": risk_score,
+        "risk_grade": risk_grade,
     }
 
 
 if __name__ == "__main__":
-    # 문서 예시로 간단히 자체 검증: CSV의 테헤란로(AADT=40890)를 표본(27041~57125) 안에서 계산
+    # 문서 예시로 간단히 자체 검증: 15개 도로 표본(gis_mapping_data.csv) 기준
+    # AADT 표본 범위 11050~57125, 불투수면비율 표본 범위 38.4~70.27
+    # 테헤란로(AADT=40890, 불투수면=57.72)로 계산
     print("--- 비가 안 올 때 (위험도는 0에 가까워야 함) ---")
     print(calculate_full_risk(
-        aadt=40890, aadt_sample_min=27041, aadt_sample_max=57125,
+        aadt=40890, aadt_sample_min=11050, aadt_sample_max=57125,
         antecedent_dry_days=5, is_raining=False,
-        impervious_ratio_pct=57.72,
+        impervious_ratio_pct=57.72, impervious_sample_min=38.4, impervious_sample_max=70.27,
     ))
 
     print("--- 비가 와서 첫씻김 기준(8h 내 3mm) 충족했을 때 ---")
     print(calculate_full_risk(
-        aadt=40890, aadt_sample_min=27041, aadt_sample_max=57125,
+        aadt=40890, aadt_sample_min=11050, aadt_sample_max=57125,
         antecedent_dry_days=5, is_raining=True,
         cumulative_mm_since_rain_start=4.0, hours_since_rain_start=2.0,
-        impervious_ratio_pct=57.72,
+        impervious_ratio_pct=57.72, impervious_sample_min=38.4, impervious_sample_max=70.27,
     ))

@@ -1,5 +1,5 @@
 """
-geocode_and_import_road_master.py
+geocode_and_import_road_master.py : 위/경도가 아닌 주소만 입력되었을 경우 실행
 tancheon_week2_final.csv(도로 마스터 원본)를 읽어, 각 도로의 "행정동" 주소를 카카오 로컬 API로
 지오코딩(위경도 변환)한 뒤, 기상청 격자좌표(nx, ny)까지 계산해서 road_master 테이블에 적재합니다.
 

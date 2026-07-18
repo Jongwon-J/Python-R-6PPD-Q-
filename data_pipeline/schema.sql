@@ -89,11 +89,16 @@ CREATE TABLE IF NOT EXISTS processed_risk_log (
     load_index             NUMERIC(6,4),
     runoff_index            NUMERIC(6,4),
     risk_score            NUMERIC(5,2),          -- 0~100
+    risk_grade             VARCHAR(10),           -- 관심/주의/경계/심각 (4단계, classify_risk_grade 결과)
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (road_id, calc_datetime)
 );
 
 CREATE INDEX IF NOT EXISTS idx_processed_risk_log_calc_datetime ON processed_risk_log (calc_datetime);
+
+-- 이미 만들어진 테이블에도 안전하게 컬럼을 추가 (CREATE TABLE IF NOT EXISTS는 기존 테이블을
+-- 수정하지 않으므로, schema.sql을 다시 실행해도 risk_grade가 없으면 여기서 추가됩니다).
+ALTER TABLE processed_risk_log ADD COLUMN IF NOT EXISTS risk_grade VARCHAR(10);
 
 -- ----------------------------------------------------------------------------
 -- 5) citizen_reports : 시민 제보 (3주차, 백엔드 담당)
@@ -125,3 +130,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_road_id ON subscriptions (road_id);
+
+-- ----------------------------------------------------------------------------
+-- 7) risk_alert_log : 위험도 등급이 상승(임계치 도달)한 순간을 기록하는 트리거 로그
+--    (CrewAI 자동 트리거 파이프라인이 "무엇을 보고 발동했는지" 추적하기 위한 테이블)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_alert_log (
+    id                  BIGSERIAL PRIMARY KEY,
+    road_id             VARCHAR(50) REFERENCES road_master(road_id),
+    calc_datetime        TIMESTAMP NOT NULL,       -- 등급이 상승한 시점의 계산 시각 (processed_risk_log 참조)
+    prev_grade           VARCHAR(10),               -- 직전 등급 (없으면 NULL = 최초 계산)
+    new_grade             VARCHAR(10) NOT NULL,      -- 상승한 새 등급
+    risk_score            NUMERIC(5,2) NOT NULL,
+    notified               BOOLEAN NOT NULL DEFAULT false,  -- CrewAI 에이전트 호출 여부
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_alert_log_road_id ON risk_alert_log (road_id);

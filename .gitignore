@@ -219,3 +219,6 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# 파이프라인 실행 로그
+data_pipeline/pipeline.log

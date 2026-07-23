@@ -9,8 +9,9 @@ geocode_and_import_road_master.py와의 차이:
 
 CSV 컬럼 (data/gis_mapping_data.csv):
     도로ID,도로명,소속구,지류,위도,경도,AADT,불투수면,위험도
-    - "지류", "위험도"는 road_master 스키마에 없는 컬럼이라 적재하지 않습니다.
-      (위험도는 참고용으로 윤서가 미리 계산해둔 값이고, 실제 서비스에서 쓰는 위험도는
+    - "지류"는 road_master.tributary 컬럼에 적재합니다 (CrewAI 알림의 공문서 양식 {지류} 필드용).
+    - "위험도"는 road_master 스키마에 없는 컬럼이라 적재하지 않습니다.
+      (참고용으로 윤서가 미리 계산해둔 값이고, 실제 서비스에서 쓰는 위험도는
       etl_risk_pipeline.py가 매번 새로 계산해서 processed_risk_log에 남깁니다.)
     - 행정동/도로연장_km/차선수/기준년도/출처_AADT/출처_불투수면은 이 CSV에 없어서 NULL로 둡니다
       (road_master에서 전부 nullable 컬럼).
@@ -110,12 +111,13 @@ def _to_float(v, default=None):
 def upsert_road(cur, row: Dict, lat: float, lon: float, nx: int, ny: int):
     sql = """
         INSERT INTO road_master
-            (road_id, road_name, gu, aadt, impervious_ratio, lat, lon, nx, ny, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            (road_id, road_name, gu, tributary, aadt, impervious_ratio, lat, lon, nx, ny, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
         ON CONFLICT (road_id)
         DO UPDATE SET
             road_name = EXCLUDED.road_name,
             gu = EXCLUDED.gu,
+            tributary = EXCLUDED.tributary,
             aadt = EXCLUDED.aadt,
             impervious_ratio = EXCLUDED.impervious_ratio,
             lat = EXCLUDED.lat,
@@ -128,6 +130,7 @@ def upsert_road(cur, row: Dict, lat: float, lon: float, nx: int, ny: int):
         row["도로ID"],
         row["도로명"],
         row.get("소속구"),
+        row.get("지류"),
         _to_int(row.get("AADT")),
         _to_float(row.get("불투수면")),
         lat, lon, nx, ny,

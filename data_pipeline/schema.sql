@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS road_master (
     road_name           VARCHAR(200) NOT NULL,
     dong                VARCHAR(100),           -- 행정동 (지오코딩 입력 주소로 사용)
     gu                  VARCHAR(50),            -- 소속구
+    tributary           VARCHAR(50),            -- 지류 (탄천/중랑천/안양천/홍제천/성내천) — 공문서 양식 {지류} 필드용
     road_length_km      NUMERIC(6,3),           -- 도로연장(km)
     lane_count          SMALLINT,               -- 차선수
     aadt                INTEGER,                -- 연평균 일교통량(AADT, 대/일)
@@ -54,6 +55,10 @@ CREATE TABLE IF NOT EXISTS road_master (
 );
 
 CREATE INDEX IF NOT EXISTS idx_road_master_nx_ny ON road_master (nx, ny);
+
+-- 이미 만들어진 테이블에도 안전하게 컬럼을 추가 (CREATE TABLE IF NOT EXISTS는 기존 테이블을
+-- 수정하지 않으므로, schema.sql을 다시 실행해도 tributary가 없으면 여기서 추가됩니다).
+ALTER TABLE road_master ADD COLUMN IF NOT EXISTS tributary VARCHAR(50);
 
 -- ----------------------------------------------------------------------------
 -- 3) dry_days_status : 선행 무강우일수(Antecedent Dry Days) 계산 결과

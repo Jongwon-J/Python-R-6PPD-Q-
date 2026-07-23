@@ -148,7 +148,11 @@ CREATE TABLE IF NOT EXISTS risk_alert_log (
     new_grade             VARCHAR(10) NOT NULL,      -- 상승한 새 등급
     risk_score            NUMERIC(5,2) NOT NULL,
     notified               BOOLEAN NOT NULL DEFAULT false,  -- CrewAI 에이전트 호출 여부
+    document_text           TEXT,                    -- CrewAI가 생성한 최종 경보 공문서 전문 (대시보드 표시용)
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_risk_alert_log_road_id ON risk_alert_log (road_id);
+
+-- 이미 만들어진 테이블에도 안전하게 컬럼을 추가.
+ALTER TABLE risk_alert_log ADD COLUMN IF NOT EXISTS document_text TEXT;

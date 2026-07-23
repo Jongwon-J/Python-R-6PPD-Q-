@@ -38,6 +38,8 @@ import psycopg2
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, LLM
 
+from sms_notifier import send_sms
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -120,8 +122,11 @@ def get_pending_alerts(cur):
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def mark_notified(cur, alert_id: int):
-    cur.execute("UPDATE risk_alert_log SET notified = true WHERE id = %s", (alert_id,))
+def mark_notified(cur, alert_id: int, document_text: str):
+    cur.execute(
+        "UPDATE risk_alert_log SET notified = true, document_text = %s WHERE id = %s",
+        (document_text, alert_id),
+    )
 
 
 def build_advisory_task(alert: dict) -> Task:
@@ -186,6 +191,14 @@ def render_document(alert: dict, admin_sentence: str, citizen_sentence: str) -> 
     )
 
 
+def build_official_sms_text(alert: dict, admin_sentence: str) -> str:
+    """담당 공무원에게 보낼 SMS 문구. 표에 정리된 '행정 조치 문장'을 그대로 전달합니다."""
+    return (
+        f"[6PPD-Q 위험도 경보] {alert['tributary']} {alert['road_name']}({alert['gu']}) "
+        f"{alert['prev_grade']}->{alert['new_grade']} (위험도 {alert['risk_score']}점)\n{admin_sentence}"
+    )
+
+
 def run():
     conn = get_conn()
     processed = 0
@@ -205,7 +218,10 @@ def run():
                 document = render_document(alert, admin_sentence, citizen_sentence)
                 logger.info(f"[ALERT #{alert['id']}] 문서 생성 완료\n{document}")
 
-                mark_notified(cur, alert["id"])
+                sms_text = build_official_sms_text(alert, admin_sentence)
+                send_sms(sms_text)
+
+                mark_notified(cur, alert["id"], document)
                 processed += 1
 
         logger.info(f"완료: 경보 문서 {processed}건 생성")

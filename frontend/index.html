@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>탄천 6PPD-Q 위험도 모니터</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  :root {
+    --ink: #16232E;
+    --ink-soft: #5B6B72;
+    --mist: #E9EFEE;
+    --surface: #FFFFFF;
+    --line: #D3DCDA;
+    --safe: #2A9D8F;
+    --safe-bg: #E3F3F0;
+    --watch: #C98A1F;
+    --watch-bg: #FBF0DC;
+    --danger: #B23A32;
+    --danger-bg: #F7E4E1;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(22,35,46,0.04), 0 8px 24px rgba(22,35,46,0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--mist);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .display {
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  .mono {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  a, button, input, select, textarea {
+    font-family: inherit;
+  }
+
+  :focus-visible {
+    outline: 2.5px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* ---------- Header ---------- */
+
+  .topbar {
+    background: var(--ink);
+    color: #EAF0EE;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .topbar h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color: #FFFFFF;
+  }
+
+  .topbar .subtitle {
+    font-size: 13px;
+    color: #9FB0AB;
+    font-weight: 400;
+  }
+
+  .live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #B9E8DC;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #4FD1B5;
+    box-shadow: 0 0 0 0 rgba(79,209,181,0.6);
+    animation: pulse 2s infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot { animation: none; }
+  }
+
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(79,209,181,0.55); }
+    70%  { box-shadow: 0 0 0 6px rgba(79,209,181,0); }
+    100% { box-shadow: 0 0 0 0 rgba(79,209,181,0); }
+  }
+
+  .synced-at {
+    font-size: 12px;
+    color: #9FB0AB;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* ---------- Layout ---------- */
+
+  .layout {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .panel-header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .panel-header .eyebrow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  /* ---------- Map ---------- */
+
+  #map {
+    height: 460px;
+    width: 100%;
+    background: #DCE5E3;
+  }
+
+  .legend {
+    display: flex;
+    gap: 14px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+  }
+
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+  /* ---------- Risk gauge list ---------- */
+
+  .gauge-list {
+    padding: 8px 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+
+  .gauge-row { padding-top: 10px; }
+
+  .gauge-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    gap: 8px;
+  }
+
+  .gauge-road-name {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .gauge-road-id {
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .gauge-score {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .gauge-track {
+    height: 8px;
+    background: #EDF2F1;
+    border-radius: 5px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .gauge-fill {
+    height: 100%;
+    border-radius: 5px;
+    width: 0%;
+    transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gauge-fill { transition: none; }
+  }
+
+  .gauge-fill.safe { background: var(--safe); }
+  .gauge-fill.watch { background: var(--watch); }
+  .gauge-fill.danger { background: var(--danger); }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge.safe { background: var(--safe-bg); color: var(--safe); }
+  .badge.watch { background: var(--watch-bg); color: var(--watch); }
+  .badge.danger { background: var(--danger-bg); color: var(--danger); }
+
+  .gauge-meta {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* ---------- Reports section ---------- */
+
+  .reports-panel {
+    grid-column: 1 / -1;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--mist);
+    padding: 3px;
+    border-radius: 10px;
+  }
+
+  .tab-btn {
+    border: none;
+    background: transparent;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .tab-btn.active {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(22,35,46,0.08);
+  }
+
+  .tab-panel { display: none; padding: 18px 20px 22px; }
+  .tab-panel.active { display: block; }
+
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+  }
+
+  .report-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--surface);
+  }
+
+  .report-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .report-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .report-status.pending { background: var(--watch-bg); color: var(--watch); }
+  .report-status.reviewed { background: #E1E9FB; color: #3556C7; }
+  .report-status.resolved { background: var(--safe-bg); color: var(--safe); }
+
+  .grade-badge.관심 { background: var(--safe-bg); color: var(--safe); }
+  .grade-badge.주의 { background: var(--watch-bg); color: var(--watch); }
+  .grade-badge.경계 { background: #FBE3DC; color: #A24B2E; }
+  .grade-badge.심각 { background: var(--danger-bg); color: var(--danger); }
+
+  .doc-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+
+  .doc-info { font-size: 13px; }
+  .doc-info .doc-road { font-weight: 600; margin-bottom: 3px; }
+  .doc-info .doc-meta { color: var(--ink-soft); font-size: 11.5px; font-family: 'IBM Plex Mono', monospace; }
+
+  .doc-download {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 12px;
+    white-space: nowrap;
+  }
+  .doc-download:hover { background: var(--mist); }
+
+  .report-desc {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--ink);
+    margin: 0 0 10px;
+  }
+
+  .report-coords {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--ink-soft);
+    font-size: 13.5px;
+  }
+
+  .empty-state strong {
+    display: block;
+    color: var(--ink);
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  /* ---------- Form ---------- */
+
+  .report-form {
+    max-width: 480px;
+  }
+
+  .field {
+    margin-bottom: 14px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    margin-bottom: 5px;
+  }
+
+  .field input,
+  .field textarea,
+  .field select {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 13.5px;
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .field textarea {
+    resize: vertical;
+    min-height: 70px;
+  }
+
+  .submit-btn {
+    background: var(--ink);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .submit-btn:hover { background: #24333F; }
+  .submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .form-note {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-top: 4px;
+  }
+
+  .toast {
+    margin-top: 12px;
+    font-size: 13px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    display: none;
+  }
+  .toast.show { display: block; }
+  .toast.ok { background: var(--safe-bg); color: var(--safe); }
+  .toast.err { background: var(--danger-bg); color: var(--danger); }
+
+  .conn-banner {
+    background: var(--watch-bg);
+    color: #8A5A16;
+    font-size: 12.5px;
+    padding: 8px 20px;
+    display: none;
+  }
+  .conn-banner.show { display: block; }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>탄천 6PPD-Q 위험도 모니터</h1>
+      <span class="subtitle">여름철 집중호우 대비 조기경보 대시보드</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+      <span class="synced-at" id="syncedAt">동기화 대기 중</span>
+    </div>
+  </header>
+
+  <div class="conn-banner" id="connBanner">
+    서버에 연결할 수 없어 샘플 데이터로 표시하고 있어요. 백엔드(uvicorn)를 실행하면 실시간 값으로 바뀌어요.
+  </div>
+
+  <div class="conn-banner" id="emptyBanner" style="background:var(--safe-bg); color:#1F6E63;">
+    서버는 연결됐지만 아직 위험도 데이터가 없어요. 기상 데이터 수집·배치 계산이 끝나면 채워져요. 지금은 참고용 샘플 값을 보여드려요.
+  </div>
+
+  <main class="layout">
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">위험 구간 지도</span>
+          <h2>도로별 6PPD-Q 위험도</h2>
+        </div>
+      </div>
+      <div id="map"></div>
+      <div class="legend">
+        <span class="legend-item"><span class="legend-dot" style="background:var(--safe)"></span>안전 (0–33)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--watch)"></span>주의 (34–66)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span>위험 (67–100)</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">실시간 순위</span>
+          <h2>위험도 게이지</h2>
+        </div>
+      </div>
+      <div class="gauge-list" id="gaugeList">
+        <!-- JS로 채워짐 -->
+      </div>
+    </section>
+
+    <section class="panel reports-panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">시민 참여</span>
+          <h2>제보</h2>
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="list">목록</button>
+          <button class="tab-btn" data-tab="new">제보하기</button>
+        </div>
+      </div>
+
+      <div class="tab-panel active" id="tab-list">
+        <div class="report-grid" id="reportGrid">
+          <!-- JS로 채워짐 -->
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-new">
+        <form class="report-form" id="reportForm">
+          <div class="field-row">
+            <div class="field">
+              <label for="lat">위도 (lat)</label>
+              <input type="number" step="0.000001" id="lat" name="lat" placeholder="37.35" required />
+            </div>
+            <div class="field">
+              <label for="lon">경도 (lon)</label>
+              <input type="number" step="0.000001" id="lon" name="lon" placeholder="127.11" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="description">제보 내용</label>
+            <textarea id="description" name="description" placeholder="예: 탄천 인근 도로에 기름띠가 보여요"></textarea>
+          </div>
+          <div class="field">
+            <label for="image">현장 사진 (선택)</label>
+            <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/webp" />
+          </div>
+          <button type="submit" class="submit-btn" id="submitBtn">제보 보내기</button>
+          <div class="form-note">위경도는 대한민국 영역 안에서만 접수돼요.</div>
+          <div class="toast" id="formToast"></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel reports-panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">관심 등록</span>
+          <h2>알림 구독</h2>
+        </div>
+      </div>
+      <div style="padding:18px 20px 22px;">
+        <form class="report-form" id="subForm">
+          <div class="field-row">
+            <div class="field">
+              <label for="subContact">연락처 (전화번호/이메일)</label>
+              <input type="text" id="subContact" name="contact" placeholder="01012345678" required />
+            </div>
+            <div class="field">
+              <label for="subRoad">관심 도로</label>
+              <select id="subRoad" name="road_id" required>
+                <option value="">불러오는 중…</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="submit-btn" id="subSubmitBtn">구독하기</button>
+          <div class="form-note">등록한 도로의 위험도가 오르면 담당 부서로 알림이 전달돼요.</div>
+          <div class="toast" id="subToast"></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel reports-panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">공무원 열람</span>
+          <h2>경보 문서</h2>
+        </div>
+      </div>
+      <div id="docList" style="padding:6px 20px 20px;">
+        <!-- JS로 채워짐 -->
+      </div>
+    </section>
+
+  </main>
+
+<script>
+  const API_BASE = 'http://127.0.0.1:8000';
+
+  const MOCK_ROADS = [
+    { road_id: '8902208', road_name: '남부순환로', lat: 37.491879, lon: 127.088069, risk_score: 78.1, calc_datetime: null },
+    { road_id: '8901921', road_name: '테헤란로',   lat: 37.511263, lon: 127.046071, risk_score: 59.5, calc_datetime: null },
+    { road_id: '1092198', road_name: '언주로',     lat: 37.483728, lon: 127.046384, risk_score: 48.6, calc_datetime: null },
+    { road_id: '8901760', road_name: '강남대로',   lat: 37.495428, lon: 127.033201, risk_score: 43.6, calc_datetime: null },
+    { road_id: '8901675', road_name: '남부순환로',   lat: 37.479783, lon: 126.985578, risk_score: 21.4, calc_datetime: null },
+  ];
+
+  const MOCK_REPORTS = [
+    { id: 1, description: '탄천 인근 기름띠 발견', lat: 37.4988, lon: 127.0349, status: 'pending', reported_at: new Date().toISOString() },
+  ];
+
+  function riskLevel(score) {
+    if (score >= 67) return 'danger';
+    if (score >= 34) return 'watch';
+    return 'safe';
+  }
+
+  function riskLabel(level) {
+    return { safe: '안전', watch: '주의', danger: '위험' }[level];
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '갱신 정보 없음';
+    const d = new Date(iso);
+    return d.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function timeAgo(iso) {
+    const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (diffMin < 1) return '방금 전';
+    if (diffMin < 60) return `${diffMin}분 전`;
+    const h = Math.round(diffMin / 60);
+    if (h < 24) return `${h}시간 전`;
+    return `${Math.round(h / 24)}일 전`;
+  }
+
+  let map, markerLayer, mapReady = false;
+
+  function initMap() {
+    try {
+      if (typeof L === 'undefined') throw new Error('leaflet not loaded');
+      map = L.map('map', { scrollWheelZoom: false }).setView([37.495, 127.05], 12);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap, &copy; CARTO',
+        maxZoom: 19,
+      }).addTo(map);
+      markerLayer = L.layerGroup().addTo(map);
+      mapReady = true;
+    } catch (e) {
+      const el = document.getElementById('map');
+      el.innerHTML = `<div class="empty-state" style="padding-top:60px">
+        <strong>지도를 불러오지 못했어요</strong>
+        인터넷 연결을 확인하고 새로고침해주세요. 오른쪽 게이지 목록은 계속 볼 수 있어요.
+      </div>`;
+    }
+  }
+
+  function colorFor(level) {
+    return { safe: '#2A9D8F', watch: '#C98A1F', danger: '#B23A32' }[level];
+  }
+
+  function renderMap(roads) {
+    if (!mapReady) return;
+    markerLayer.clearLayers();
+    roads.forEach((r) => {
+      const level = riskLevel(r.risk_score);
+      const marker = L.circleMarker([r.lat, r.lon], {
+        radius: 9 + r.risk_score / 12,
+        color: colorFor(level),
+        weight: 2,
+        fillColor: colorFor(level),
+        fillOpacity: 0.55,
+      }).addTo(markerLayer);
+      marker.bindPopup(
+        `<strong>${r.road_name}</strong><br/>위험도 ${r.risk_score.toFixed(1)} · ${riskLabel(level)}<br/><span style="color:#5B6B72;font-size:11px">${fmtTime(r.calc_datetime)}</span>`
+      );
+    });
+  }
+
+  function renderGaugeList(roads) {
+    const sorted = [...roads].sort((a, b) => b.risk_score - a.risk_score);
+    const el = document.getElementById('gaugeList');
+    el.innerHTML = '';
+    sorted.forEach((r) => {
+      const level = riskLevel(r.risk_score);
+      const row = document.createElement('div');
+      row.className = 'gauge-row';
+      row.innerHTML = `
+        <div class="gauge-row-top">
+          <div>
+            <div class="gauge-road-name">${r.road_name}</div>
+            <div class="gauge-road-id">${r.road_id}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="gauge-score">${r.risk_score.toFixed(1)}</div>
+            <span class="badge ${level}">${riskLabel(level)}</span>
+          </div>
+        </div>
+        <div class="gauge-track">
+          <div class="gauge-fill ${level}" data-target="${r.risk_score}"></div>
+        </div>
+        <div class="gauge-meta">${fmtTime(r.calc_datetime)}</div>
+      `;
+      el.appendChild(row);
+    });
+    requestAnimationFrame(() => {
+      el.querySelectorAll('.gauge-fill').forEach((f) => {
+        f.style.width = f.dataset.target + '%';
+      });
+    });
+  }
+
+  function renderReports(reports) {
+    const grid = document.getElementById('reportGrid');
+    if (!reports.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <strong>아직 들어온 제보가 없어요</strong>
+        현장에서 이상 징후를 발견하면 '제보하기' 탭에서 알려주세요.
+      </div>`;
+      return;
+    }
+    grid.innerHTML = '';
+    reports.forEach((r) => {
+      const card = document.createElement('div');
+      card.className = 'report-card';
+      card.innerHTML = `
+        <div class="report-card-top">
+          <span class="report-status ${r.status}">${{pending:'접수', reviewed:'검토중', resolved:'처리완료'}[r.status] || r.status}</span>
+          <span class="report-coords">${timeAgo(r.reported_at)}</span>
+        </div>
+        <p class="report-desc">${r.description ? escapeHtml(r.description) : '작성된 설명이 없어요.'}</p>
+        <div class="report-coords">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div>
+      `;
+      grid.appendChild(card);
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderDocList(docs) {
+    const el = document.getElementById('docList');
+    if (!docs.length) {
+      el.innerHTML = `<div class="empty-state">
+        <strong>아직 생성된 경보 문서가 없어요</strong>
+        도로 위험도 등급이 상승하면 자동으로 문서가 만들어져요.
+      </div>`;
+      return;
+    }
+    el.innerHTML = '';
+    docs.forEach((d) => {
+      const card = document.createElement('div');
+      card.className = 'doc-card';
+      card.innerHTML = `
+        <div class="doc-info">
+          <div class="doc-road">
+            ${d.road_name}
+            <span class="badge grade-badge ${d.new_grade}" style="margin-left:6px">${d.new_grade}</span>
+          </div>
+          <div class="doc-meta">위험도 ${Number(d.risk_score).toFixed(1)} · ${fmtTime(d.created_at)}</div>
+        </div>
+        <a class="doc-download" href="${API_BASE}/documents/${d.id}/download" target="_blank" rel="noopener">다운로드</a>
+      `;
+      el.appendChild(card);
+    });
+  }
+
+  async function loadDocuments() {
+    try {
+      const res = await fetch(`${API_BASE}/documents/`);
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      renderDocList(data);
+    } catch (e) {
+      renderDocList([]);
+    }
+  }
+
+  async function populateRoadSelect() {
+    const select = document.getElementById('subRoad');
+    let roads = MOCK_ROADS;
+    try {
+      const res = await fetch(`${API_BASE}/risk/roads`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.length) roads = data;
+      }
+    } catch (e) { /* MOCK_ROADS 사용 */ }
+
+    select.innerHTML = '';
+    roads.forEach((r) => {
+      const opt = document.createElement('option');
+      opt.value = r.road_id;
+      opt.textContent = `${r.road_name} (${r.road_id})`;
+      select.appendChild(opt);
+    });
+  }
+  function showConnBanner(show) {
+    document.getElementById('connBanner').classList.toggle('show', show);
+  }
+
+  function showEmptyBanner(show) {
+    document.getElementById('emptyBanner').classList.toggle('show', show);
+  }
+
+  async function loadRoads() {
+    try {
+      const res = await fetch(`${API_BASE}/risk/roads`);
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      const hasData = data.length > 0;
+      const roads = hasData ? data.map(d => ({ ...d, risk_score: Number(d.risk_score) })) : MOCK_ROADS;
+      renderMap(roads);
+      renderGaugeList(roads);
+      showConnBanner(false);
+      showEmptyBanner(!hasData);
+      return true;
+    } catch (e) {
+      renderMap(MOCK_ROADS);
+      renderGaugeList(MOCK_ROADS);
+      showEmptyBanner(false);
+      showConnBanner(true);
+      return false;
+    }
+  }
+
+  async function loadReports() {
+    try {
+      const res = await fetch(`${API_BASE}/reports/`);
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      renderReports(data.length ? data : []);
+    } catch (e) {
+      renderReports(MOCK_REPORTS);
+    }
+  }
+
+  async function refreshAll() {
+    const ok = await loadRoads();
+    await loadReports();
+    document.getElementById('syncedAt').textContent =
+      (ok ? '동기화 ' : '오프라인 · ') + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+    });
+  });
+
+  // Report form
+  document.getElementById('reportForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn');
+    const toast = document.getElementById('formToast');
+    toast.className = 'toast';
+
+    const lat = document.getElementById('lat').value;
+    const lon = document.getElementById('lon').value;
+    const description = document.getElementById('description').value;
+    const image = document.getElementById('image').files[0];
+
+    const formData = new FormData();
+    formData.append('lat', lat);
+    formData.append('lon', lon);
+    if (description) formData.append('description', description);
+    if (image) formData.append('image', image);
+
+    btn.disabled = true;
+    btn.textContent = '보내는 중…';
+
+    try {
+      const res = await fetch(`${API_BASE}/reports/`, { method: 'POST', body: formData });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || '전송에 실패했어요');
+      toast.textContent = '제보가 접수됐어요. 확인 후 조치할게요.';
+      toast.className = 'toast show ok';
+      e.target.reset();
+      loadReports();
+    } catch (err) {
+      toast.textContent = typeof err.message === 'string' ? err.message : '전송에 실패했어요. 잠시 후 다시 시도해주세요.';
+      toast.className = 'toast show err';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '제보 보내기';
+    }
+  });
+
+  document.getElementById('subForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('subSubmitBtn');
+    const toast = document.getElementById('subToast');
+    toast.className = 'toast';
+
+    const contact = document.getElementById('subContact').value;
+    const road_id = document.getElementById('subRoad').value;
+
+    btn.disabled = true;
+    btn.textContent = '등록하는 중…';
+
+    try {
+      const res = await fetch(`${API_BASE}/subscriptions/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact, road_id }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || '등록에 실패했어요');
+      toast.textContent = '구독이 등록됐어요.';
+      toast.className = 'toast show ok';
+      e.target.reset();
+    } catch (err) {
+      toast.textContent = typeof err.message === 'string' ? err.message : '등록에 실패했어요. 잠시 후 다시 시도해주세요.';
+      toast.className = 'toast show err';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '구독하기';
+    }
+  });
+
+  initMap();
+  refreshAll();
+  populateRoadSelect();
+  loadDocuments();
+  setInterval(refreshAll, 60000); // 1분마다 자동 갱신 (10분 배치 주기에 맞춘 여유 있는 폴링)
+</script>
+
+</body>
+</html>

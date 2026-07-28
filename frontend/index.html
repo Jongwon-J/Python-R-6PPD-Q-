@@ -911,6 +911,11 @@
         ${imageHtml}
         <p class="report-desc">${r.description ? escapeHtml(r.description) : '작성된 설명이 없어요.'}</p>
         <div class="report-coords">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div>
+        <select class="status-select" data-id="${r.id}" style="margin-top:8px; width:100%; font-size:12px; padding:5px; border-radius:6px; border:1px solid var(--line);">
+          <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>접수</option>
+          <option value="reviewed" ${r.status === 'reviewed' ? 'selected' : ''}>검토중</option>
+          <option value="resolved" ${r.status === 'resolved' ? 'selected' : ''}>처리완료</option>
+        </select>
       `;
       grid.appendChild(card);
     });
@@ -1076,6 +1081,23 @@
 
   document.getElementById('loadMoreBtn').addEventListener('click', () => {
     loadReports(true);
+  });
+
+  document.getElementById('reportGrid').addEventListener('change', async (e) => {
+    if (!e.target.classList.contains('status-select')) return;
+    const id = e.target.dataset.id;
+    const newStatus = e.target.value;
+    try {
+      const res = await fetch(`${API_BASE}/reports/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error('업데이트 실패');
+      loadReports(false);
+    } catch (err) {
+      alert('상태 변경에 실패했어요. 다시 시도해주세요.');
+    }
   });
 
   initMap();

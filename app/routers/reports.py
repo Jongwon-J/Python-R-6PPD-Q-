@@ -120,3 +120,31 @@ def list_reports(
         "offset": offset,
         "has_more": offset + limit < total,
     }
+
+from pydantic import BaseModel
+
+VALID_STATUSES = {"pending", "reviewed", "resolved"}
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+@router.patch("/{report_id}/status", response_model=ReportResponse)
+def update_report_status(report_id: int, payload: StatusUpdate, db: Session = Depends(get_db)):
+    """제보 상태 변경 (접수 → 검토중 → 처리완료)"""
+    if payload.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status는 {', '.join(VALID_STATUSES)} 중 하나여야 합니다.",
+        )
+
+    report = db.query(CitizenReport).filter(CitizenReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail=f"id={report_id} 제보를 찾을 수 없습니다.")
+
+    report.status = payload.status
+    db.commit()
+    db.refresh(report)
+    return report 
+    

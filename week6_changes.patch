@@ -1,0 +1,516 @@
+From 3ccf785c4929cb797b8d5cfce27f54eeaea97b1f Mon Sep 17 00:00:00 2001
+From: skkzoxo <skkzoxo@users.noreply.github.com>
+Date: Mon, 27 Jul 2026 00:39:45 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20Docker=20=EC=BB=A8=ED=85=8C=EC=9D=B4?=
+ =?UTF-8?q?=EB=84=88=ED=99=94,=20=EB=B6=80=ED=95=98=20=ED=85=8C=EC=8A=A4?=
+ =?UTF-8?q?=ED=8A=B8,=20=EB=9E=9C=EB=94=A9=ED=8E=98=EC=9D=B4=EC=A7=80=20?=
+ =?UTF-8?q?=EC=B6=94=EA=B0=80?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Dockerfile: FastAPI 백엔드 이미지 (uvicorn --workers 4)
+- docker-compose.yml: db(postgres, 스키마 자동 초기화) + backend + frontend(nginx) 통합
+- .dockerignore: venv/캐시/민감정보 제외
+- locustfile.py: /health, /risk/roads, /reports, /documents, /subscriptions 시나리오
+  - 로컬에서 동시접속 20~30명, 12~15초 실행 결과 실패율 0%, 최대 응답 70ms 확인
+- app/database.py: 부하 대비 커넥션 풀 명시 (pool_size=10, max_overflow=10)
+- frontend/landing.html: 프로젝트 소개 랜딩페이지 (실시간 위험도 스냅샷, 위험도 계산 흐름 인포그래픽, 기능 소개)
+- frontend/index.html: 랜딩페이지로 돌아가는 링크 추가
+---
+ .dockerignore         |  10 ++
+ Dockerfile            |  19 +++
+ app/database.py       |  11 +-
+ docker-compose.yml    |  50 ++++++++
+ frontend/index.html   |   1 +
+ frontend/landing.html | 273 ++++++++++++++++++++++++++++++++++++++++++
+ locustfile.py         |  63 ++++++++++
+ 7 files changed, 426 insertions(+), 1 deletion(-)
+ create mode 100644 .dockerignore
+ create mode 100644 Dockerfile
+ create mode 100644 docker-compose.yml
+ create mode 100644 frontend/landing.html
+ create mode 100644 locustfile.py
+
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..13cfb64
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,10 @@
++venv/
++__pycache__/
++*.pyc
++.env
++.git/
++.gitignore
++uploads/
++data_pipeline/data/
++visualization/
++*.md
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..67fee08
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,19 @@
++# --- EcoBridge-6PPDQ 백엔드(FastAPI) 이미지 ---
++FROM python:3.12-slim
++
++WORKDIR /app
++
++# psycopg2 빌드에 필요한 라이브러리 (psycopg2-binary는 보통 불필요하지만, 안전하게 포함)
++RUN apt-get update && apt-get install -y --no-install-recommends \
++    libpq-dev gcc \
++    && rm -rf /var/lib/apt/lists/*
++
++COPY app/requirements.txt ./requirements.txt
++RUN pip install --no-cache-dir -r requirements.txt
++
++COPY app/ ./app/
++
++EXPOSE 8000
++
++# 여러 워커로 띄워 동시 요청을 나눠 처리 (부하 테스트 대비)
++CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+diff --git a/app/database.py b/app/database.py
+index d6721ed..248ff56 100644
+--- a/app/database.py
++++ b/app/database.py
+@@ -3,7 +3,16 @@ from sqlalchemy.orm import sessionmaker, declarative_base
+ 
+ from app.config import DATABASE_URL
+ 
+-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
++# 부하 테스트/운영 환경 대비: 워커 프로세스당 커넥션 풀을 명시적으로 지정.
++# uvicorn --workers 4 기준으로 워커당 pool_size=10 + max_overflow=10 → 워커당 최대 20개,
++# 전체 최대 80개 커넥션까지 열릴 수 있음. PostgreSQL 기본 max_connections(100)를 넘지 않게 설정.
++engine = create_engine(
++    DATABASE_URL,
++    pool_pre_ping=True,
++    pool_size=10,
++    max_overflow=10,
++    pool_timeout=30,
++)
+ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+ 
+ Base = declarative_base()
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..2e8f791
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,50 @@
++version: "3.9"
++
++services:
++  db:
++    image: postgres:16
++    restart: unless-stopped
++    environment:
++      POSTGRES_DB: ${DB_NAME:-tancheon_risk}
++      POSTGRES_USER: ${DB_USER:-postgres}
++      POSTGRES_PASSWORD: ${DB_PASSWORD}
++    volumes:
++      - pgdata:/var/lib/postgresql/data
++      # 최초 컨테이너 생성 시 1회 자동 실행되어 스키마를 만들어줌
++      - ./data_pipeline/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
++    ports:
++      - "5432:5432"
++    healthcheck:
++      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
++      interval: 5s
++      timeout: 5s
++      retries: 10
++
++  backend:
++    build:
++      context: .
++      dockerfile: Dockerfile
++    restart: unless-stopped
++    env_file:
++      - .env
++    environment:
++      # 컨테이너 네트워크 안에서는 localhost가 아니라 서비스 이름(db)으로 접속해야 함
++      DB_HOST: db
++    depends_on:
++      db:
++        condition: service_healthy
++    ports:
++      - "8000:8000"
++
++  frontend:
++    image: nginx:alpine
++    restart: unless-stopped
++    volumes:
++      - ./frontend:/usr/share/nginx/html:ro
++    ports:
++      - "8080:80"
++    depends_on:
++      - backend
++
++volumes:
++  pgdata:
+diff --git a/frontend/index.html b/frontend/index.html
+index 4f33785..c0a836d 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -485,6 +485,7 @@
+ 
+   <header class="topbar">
+     <div class="topbar-left">
++      <a href="./landing.html" style="color:#9FB0AB; text-decoration:none; font-size:13px; margin-right:4px;">← 소개</a>
+       <h1>탄천 6PPD-Q 위험도 모니터</h1>
+       <span class="subtitle">여름철 집중호우 대비 조기경보 대시보드</span>
+     </div>
+diff --git a/frontend/landing.html b/frontend/landing.html
+new file mode 100644
+index 0000000..0823e23
+--- /dev/null
++++ b/frontend/landing.html
+@@ -0,0 +1,273 @@
++<!DOCTYPE html>
++<html lang="ko">
++<head>
++<meta charset="UTF-8" />
++<meta name="viewport" content="width=device-width, initial-scale=1.0" />
++<title>탄천 6PPD-Q 조기경보 프로젝트</title>
++
++<link rel="preconnect" href="https://fonts.googleapis.com">
++<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
++<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
++
++<style>
++  :root {
++    --ink: #16232E;
++    --ink-soft: #5B6B72;
++    --mist: #E9EFEE;
++    --surface: #FFFFFF;
++    --line: #D3DCDA;
++    --safe: #2A9D8F;
++    --safe-bg: #E3F3F0;
++    --watch: #C98A1F;
++    --watch-bg: #FBF0DC;
++    --danger: #B23A32;
++    --danger-bg: #F7E4E1;
++    --radius: 14px;
++    --shadow: 0 1px 2px rgba(22,35,46,0.04), 0 8px 24px rgba(22,35,46,0.06);
++  }
++
++  * { box-sizing: border-box; }
++  html, body { margin: 0; padding: 0; background: var(--surface); color: var(--ink); font-family: 'Inter', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
++  h1, h2, h3, .display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.01em; }
++  .mono { font-family: 'IBM Plex Mono', monospace; }
++  a { color: inherit; }
++  :focus-visible { outline: 2.5px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
++
++  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
++
++  /* nav */
++  .nav {
++    display: flex; align-items: center; justify-content: space-between;
++    padding: 18px 24px; border-bottom: 1px solid var(--line);
++  }
++  .nav .brand { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 16px; }
++  .nav .cta-link {
++    background: var(--ink); color: #fff; text-decoration: none;
++    font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 8px;
++  }
++
++  /* hero */
++  .hero { background: var(--mist); padding: 72px 24px 64px; text-align: center; }
++  .hero .eyebrow {
++    display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
++    color: var(--safe); background: var(--safe-bg); padding: 5px 12px; border-radius: 999px; margin-bottom: 18px;
++  }
++  .hero h1 { font-size: 40px; line-height: 1.25; margin: 0 0 16px; }
++  .hero p.lead { font-size: 16px; color: var(--ink-soft); max-width: 560px; margin: 0 auto 30px; line-height: 1.6; }
++  .hero-ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
++  .btn-primary {
++    background: var(--ink); color: #fff; text-decoration: none;
++    font-size: 14px; font-weight: 600; padding: 13px 22px; border-radius: 10px;
++  }
++  .btn-secondary {
++    background: var(--surface); color: var(--ink); text-decoration: none; border: 1px solid var(--line);
++    font-size: 14px; font-weight: 600; padding: 13px 22px; border-radius: 10px;
++  }
++
++  @media (max-width: 640px) { .hero h1 { font-size: 30px; } }
++
++  /* live snapshot */
++  .section { padding: 56px 24px; }
++  .section-head { text-align: center; margin-bottom: 34px; }
++  .section-head .eyebrow-mini { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); font-weight: 600; }
++  .section-head h2 { font-size: 26px; margin: 6px 0 8px; }
++  .section-head p { color: var(--ink-soft); font-size: 14.5px; max-width: 480px; margin: 0 auto; }
++
++  .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; max-width: 900px; margin: 0 auto; }
++  .snap-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
++  .snap-card .snap-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
++  .snap-card .snap-score { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; }
++  .snap-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; margin-top: 6px; }
++  .snap-badge.safe { background: var(--safe-bg); color: var(--safe); }
++  .snap-badge.watch { background: var(--watch-bg); color: var(--watch); }
++  .snap-badge.danger { background: var(--danger-bg); color: var(--danger); }
++  .snapshot-note { text-align: center; font-size: 12.5px; color: var(--ink-soft); margin-top: 14px; }
++
++  /* features */
++  .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; max-width: 960px; margin: 0 auto; }
++  .feature-card { padding: 22px; border-radius: var(--radius); background: var(--mist); }
++  .feature-card .feature-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--surface); display: flex; align-items: center; justify-content: center; margin-bottom: 14px; font-size: 17px; }
++  .feature-card h3 { font-size: 15.5px; margin: 0 0 6px; }
++  .feature-card p { font-size: 13px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
++
++  /* infographic */
++  .infographic { background: var(--ink); color: #EAF0EE; border-radius: 20px; padding: 40px 28px; max-width: 960px; margin: 0 auto; }
++  .infographic h2 { color: #fff; text-align: center; font-size: 22px; margin: 0 0 6px; }
++  .infographic .sub { text-align: center; color: #9FB0AB; font-size: 13px; margin-bottom: 30px; }
++  .flow { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
++  .flow-step {
++    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
++    border-radius: 12px; padding: 14px 16px; width: 150px; text-align: center;
++  }
++  .flow-step .step-num { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4FD1B5; margin-bottom: 6px; }
++  .flow-step .step-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
++  .flow-step .step-desc { font-size: 11.5px; color: #9FB0AB; line-height: 1.4; }
++  .flow-arrow { color: #4FD1B5; font-size: 18px; }
++  @media (max-width: 760px) { .flow { flex-direction: column; } .flow-arrow { transform: rotate(90deg); } }
++
++  .formula-note { text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9FB0AB; margin-top: 26px; }
++
++  /* footer cta */
++  .footer-cta { text-align: center; padding: 64px 24px 80px; }
++  .footer-cta h2 { font-size: 24px; margin: 0 0 10px; }
++  .footer-cta p { color: var(--ink-soft); margin: 0 0 24px; }
++
++  footer { border-top: 1px solid var(--line); padding: 24px; text-align: center; font-size: 12px; color: var(--ink-soft); }
++</style>
++</head>
++<body>
++
++  <nav class="nav">
++    <div class="brand">🌊 EcoBridge-6PPDQ</div>
++    <a class="cta-link" href="./index.html">대시보드 열기</a>
++  </nav>
++
++  <header class="hero">
++    <span class="eyebrow">여름철 집중호우 대비</span>
++    <h1>타이어 마모 입자(6PPD-Q)의<br/>하천 유입을 미리 경고합니다</h1>
++    <p class="lead">
++      강수량·건조일수·교통량·불투수면 데이터를 실시간으로 결합해 도로별 위험도를 계산하고,
++      기준을 넘으면 담당 부서에 자동으로 알립니다.
++    </p>
++    <div class="hero-ctas">
++      <a class="btn-primary" href="./index.html">실시간 대시보드 보기</a>
++      <a class="btn-secondary" href="#how-it-works">작동 방식 보기</a>
++    </div>
++  </header>
++
++  <section class="section">
++    <div class="section-head">
++      <span class="eyebrow-mini">Live</span>
++      <h2>지금 위험도가 가장 높은 구간</h2>
++      <p>1분마다 갱신되는 실시간 값이에요. 서버가 꺼져 있으면 예시 값으로 보여드려요.</p>
++    </div>
++    <div class="snapshot-grid" id="snapshotGrid">
++      <!-- JS로 채워짐 -->
++    </div>
++    <div class="snapshot-note" id="snapshotNote"></div>
++  </section>
++
++  <section class="section" id="how-it-works">
++    <div class="infographic">
++      <h2>위험도는 이렇게 계산돼요</h2>
++      <div class="sub">4가지 데이터를 결합해 0~100점의 위험도 점수를 산출합니다</div>
++      <div class="flow">
++        <div class="flow-step">
++          <div class="step-num">01</div>
++          <div class="step-title">강수 데이터</div>
++          <div class="step-desc">기상청 API 실시간 강수량 수집</div>
++        </div>
++        <div class="flow-arrow">→</div>
++        <div class="flow-step">
++          <div class="step-num">02</div>
++          <div class="step-title">선행 건조일수</div>
++          <div class="step-desc">비가 안 온 기간이 길수록 오염 누적</div>
++        </div>
++        <div class="flow-arrow">→</div>
++        <div class="flow-step">
++          <div class="step-num">03</div>
++          <div class="step-title">교통량·불투수면</div>
++          <div class="step-desc">AADT, 불투수면적 비율 결합</div>
++        </div>
++        <div class="flow-arrow">→</div>
++        <div class="flow-step">
++          <div class="step-num">04</div>
++          <div class="step-title">위험도 점수</div>
++          <div class="step-desc">0~100점, 등급별 자동 경보</div>
++        </div>
++      </div>
++      <div class="formula-note">위험도 = 부하지수 × 유출지수 × 100</div>
++    </div>
++  </section>
++
++  <section class="section">
++    <div class="section-head">
++      <span class="eyebrow-mini">Features</span>
++      <h2>대시보드에서 할 수 있는 것</h2>
++    </div>
++    <div class="feature-grid">
++      <div class="feature-card">
++        <div class="feature-icon">🗺️</div>
++        <h3>실시간 위험도 지도</h3>
++        <p>도로별 위험도를 안전·주의·위험 3단계 색상으로 한눈에 확인해요.</p>
++      </div>
++      <div class="feature-card">
++        <div class="feature-icon">📷</div>
++        <h3>시민 제보</h3>
++        <p>현장에서 이상 징후를 발견하면 사진과 위치를 바로 제보할 수 있어요.</p>
++      </div>
++      <div class="feature-card">
++        <div class="feature-icon">🔔</div>
++        <h3>관심 도로 구독</h3>
++        <p>관심 있는 도로를 등록하면 위험도가 오를 때 알림이 전달돼요.</p>
++      </div>
++      <div class="feature-card">
++        <div class="feature-icon">📄</div>
++        <h3>공무원용 경보문서</h3>
++        <p>등급 상승 시 AI가 작성한 행정 공문서를 바로 다운로드할 수 있어요.</p>
++      </div>
++    </div>
++  </section>
++
++  <section class="footer-cta">
++    <h2>지금 대시보드에서 실시간 상황을 확인해보세요</h2>
++    <p>별도 설치 없이 브라우저에서 바로 볼 수 있어요.</p>
++    <a class="btn-primary" href="./index.html">대시보드 열기 →</a>
++  </section>
++
++  <footer>
++    EcoBridge-6PPDQ · 여름철 폭우 대비 타이어 마모 입자(6PPD-Q) 하천 유입 조기경보 프로젝트
++  </footer>
++
++<script>
++  const API_BASE = 'http://127.0.0.1:8000';
++
++  const MOCK_ROADS = [
++    { road_id: '8902208', road_name: '남부순환로', risk_score: 78.1 },
++    { road_id: '8901921', road_name: '테헤란로', risk_score: 59.5 },
++    { road_id: '1092198', road_name: '언주로', risk_score: 48.6 },
++  ];
++
++  function riskLevel(score) {
++    if (score >= 67) return 'danger';
++    if (score >= 34) return 'watch';
++    return 'safe';
++  }
++  function riskLabel(level) { return { safe: '안전', watch: '주의', danger: '위험' }[level]; }
++
++  function renderSnapshot(roads, isSample) {
++    const top3 = [...roads].sort((a, b) => b.risk_score - a.risk_score).slice(0, 3);
++    const grid = document.getElementById('snapshotGrid');
++    grid.innerHTML = '';
++    top3.forEach((r) => {
++      const level = riskLevel(r.risk_score);
++      const card = document.createElement('div');
++      card.className = 'snap-card';
++      card.innerHTML = `
++        <div class="snap-name">${r.road_name}</div>
++        <div class="snap-score">${Number(r.risk_score).toFixed(1)}</div>
++        <span class="snap-badge ${level}">${riskLabel(level)}</span>
++      `;
++      grid.appendChild(card);
++    });
++    document.getElementById('snapshotNote').textContent = isSample
++      ? '지금은 서버 미연결로 예시 값을 보여드리고 있어요.'
++      : '';
++  }
++
++  async function loadSnapshot() {
++    try {
++      const res = await fetch(`${API_BASE}/risk/roads`);
++      if (!res.ok) throw new Error('bad response');
++      const data = await res.json();
++      renderSnapshot(data.length ? data : MOCK_ROADS, data.length === 0);
++    } catch (e) {
++      renderSnapshot(MOCK_ROADS, true);
++    }
++  }
++
++  loadSnapshot();
++</script>
++
++</body>
++</html>
+diff --git a/locustfile.py b/locustfile.py
+new file mode 100644
+index 0000000..42baf79
+--- /dev/null
++++ b/locustfile.py
+@@ -0,0 +1,63 @@
++"""
++locustfile.py — EcoBridge-6PPDQ 백엔드 부하 테스트.
++
++실행 방법:
++    pip install locust
++    locust -f locustfile.py --host http://127.0.0.1:8000
++
++웹 UI(기본 http://localhost:8089)에서 동시 사용자 수, 스폰 속도를 지정해서 실행.
++"""
++
++import random
++
++from locust import HttpUser, task, between
++
++
++SAMPLE_ROAD_IDS = ["8901760", "8902208", "8901921", "1092198", "8901675"]
++
++
++class DashboardUser(HttpUser):
++    """대시보드를 보는 일반 사용자 시나리오. 조회가 대부분, 쓰기는 드물게."""
++
++    wait_time = between(1, 3)
++
++    @task(5)
++    def view_health(self):
++        self.client.get("/health")
++
++    @task(10)
++    def view_risk_roads(self):
++        """가장 자주 호출되는 엔드포인트 — 대시보드가 1분마다 폴링하는 화면"""
++        self.client.get("/risk/roads")
++
++    @task(6)
++    def view_reports(self):
++        self.client.get("/reports/")
++
++    @task(3)
++    def view_documents(self):
++        self.client.get("/documents/")
++
++    @task(1)
++    def submit_report(self):
++        """시민 제보 등록 — 쓰기 작업, DB insert + 트랜잭션 확인용"""
++        lat = round(random.uniform(37.40, 37.55), 6)
++        lon = round(random.uniform(127.00, 127.12), 6)
++        self.client.post(
++            "/reports/",
++            data={
++                "lat": lat,
++                "lon": lon,
++                "description": "부하 테스트 자동 생성 제보",
++            },
++        )
++
++    @task(1)
++    def subscribe(self):
++        """구독 등록 — 매번 다른 연락처로 시도해 409 중복 에러를 피함"""
++        contact = f"010{random.randint(10000000, 99999999)}"
++        road_id = random.choice(SAMPLE_ROAD_IDS)
++        self.client.post(
++            "/subscriptions/",
++            json={"contact": contact, "road_id": road_id},
++        )
+-- 
+2.43.0
+

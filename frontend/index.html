@@ -62,7 +62,9 @@
   /* ---------- Header ---------- */
 
   .topbar {
-    background: var(--ink);
+    background: linear-gradient(120deg, #16232E 0%, #1D3A3A 45%, #16232E 100%);
+    background-size: 200% 200%;
+    animation: gradientShift 10s ease infinite;
     color: #EAF0EE;
     padding: 14px 24px;
     display: flex;
@@ -70,6 +72,16 @@
     justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
+  }
+
+  @keyframes gradientShift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .topbar { animation: none; }
   }
 
   .topbar-left {
@@ -102,12 +114,12 @@
   }
 
   .live-dot {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: #4FD1B5;
-    box-shadow: 0 0 0 0 rgba(79,209,181,0.6);
-    animation: pulse 2s infinite;
+    box-shadow: 0 0 0 0 rgba(79,209,181,0.6), 0 0 8px 1px rgba(79,209,181,0.8);
+    animation: pulse 1.8s infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -115,9 +127,9 @@
   }
 
   @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(79,209,181,0.55); }
-    70%  { box-shadow: 0 0 0 6px rgba(79,209,181,0); }
-    100% { box-shadow: 0 0 0 0 rgba(79,209,181,0); }
+    0%   { box-shadow: 0 0 0 0 rgba(79,209,181,0.55), 0 0 8px 1px rgba(79,209,181,0.8); }
+    70%  { box-shadow: 0 0 0 8px rgba(79,209,181,0), 0 0 10px 2px rgba(79,209,181,0.5); }
+    100% { box-shadow: 0 0 0 0 rgba(79,209,181,0), 0 0 8px 1px rgba(79,209,181,0.8); }
   }
 
   .synced-at {
@@ -146,6 +158,16 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     overflow: hidden;
+    animation: fadeSlideUp 0.5s ease both;
+  }
+
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel { animation: none; }
   }
 
   .panel-header {
@@ -181,6 +203,26 @@
     background: #DCE5E3;
   }
 
+  .pulse-halo-icon { background: transparent; border: none; }
+  .pulse-halo {
+    display: block;
+    width: 26px;
+    height: 26px;
+    margin: -13px 0 0 -13px;
+    border-radius: 50%;
+    background: rgba(178,58,50,0.35);
+    animation: haloPulse 1.8s ease-out infinite;
+  }
+
+  @keyframes haloPulse {
+    0%   { transform: scale(0.5); opacity: 0.8; }
+    100% { transform: scale(2.1); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-halo { animation: none; display: none; }
+  }
+
   .legend {
     display: flex;
     gap: 14px;
@@ -205,7 +247,14 @@
     overflow-y: auto;
   }
 
-  .gauge-row { padding-top: 10px; }
+  .gauge-row {
+    padding-top: 10px;
+    animation: fadeSlideUp 0.4s ease both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gauge-row { animation: none; }
+  }
 
   .gauge-row-top {
     display: flex;
@@ -245,16 +294,32 @@
     height: 100%;
     border-radius: 5px;
     width: 0%;
+    position: relative;
+    overflow: hidden;
     transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .gauge-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+    transform: translateX(-100%);
+    animation: shimmer 2.4s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    100% { transform: translateX(100%); }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .gauge-fill { transition: none; }
+    .gauge-fill::after { animation: none; display: none; }
   }
 
-  .gauge-fill.safe { background: var(--safe); }
-  .gauge-fill.watch { background: var(--watch); }
-  .gauge-fill.danger { background: var(--danger); }
+  .gauge-fill.safe { background: linear-gradient(90deg, #2A9D8F, #4FD1B5); }
+  .gauge-fill.watch { background: linear-gradient(90deg, #C98A1F, #F0B94B); }
+  .gauge-fill.danger { background: linear-gradient(90deg, #B23A32, #E85D52); }
 
   .badge {
     font-size: 11px;
@@ -262,10 +327,25 @@
     padding: 3px 8px;
     border-radius: 999px;
     white-space: nowrap;
+    transition: transform 0.15s ease;
   }
-  .badge.safe { background: var(--safe-bg); color: var(--safe); }
-  .badge.watch { background: var(--watch-bg); color: var(--watch); }
-  .badge.danger { background: var(--danger-bg); color: var(--danger); }
+  .badge.safe { background: var(--safe-bg); color: var(--safe); box-shadow: 0 0 0 1px rgba(42,157,143,0.15); }
+  .badge.watch { background: var(--watch-bg); color: var(--watch); box-shadow: 0 0 0 1px rgba(201,138,31,0.18); }
+  .badge.danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+    box-shadow: 0 0 0 1px rgba(178,58,50,0.2), 0 0 10px rgba(178,58,50,0.25);
+    animation: badgePulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes badgePulse {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(178,58,50,0.2), 0 0 6px rgba(178,58,50,0.2); }
+    50%      { box-shadow: 0 0 0 1px rgba(178,58,50,0.3), 0 0 14px rgba(178,58,50,0.4); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .badge.danger { animation: none; }
+  }
 
   .gauge-meta {
     margin-top: 6px;
@@ -278,6 +358,30 @@
 
   .reports-panel {
     grid-column: 1 / -1;
+  }
+
+  .status-filters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .status-filter-btn {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-soft);
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .status-filter-btn.active {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
   }
 
   .tabs {
@@ -319,6 +423,16 @@
     border-radius: 12px;
     padding: 14px;
     background: var(--surface);
+    animation: fadeSlideUp 0.4s ease both;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .report-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(22,35,46,0.08);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .report-card { animation: none; }
   }
 
   .report-card-top {
@@ -355,6 +469,16 @@
     border-radius: 12px;
     padding: 12px 14px;
     margin-bottom: 10px;
+    animation: fadeSlideUp 0.4s ease both;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .doc-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(22,35,46,0.08);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .doc-card { animation: none; }
   }
 
   .doc-info { font-size: 13px; }
@@ -442,7 +566,7 @@
   }
 
   .submit-btn {
-    background: var(--ink);
+    background: linear-gradient(135deg, #16232E 0%, #1F4A47 100%);
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -450,8 +574,13 @@
     font-size: 13.5px;
     font-weight: 600;
     cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 2px 8px rgba(22,35,46,0.18);
   }
-  .submit-btn:hover { background: #24333F; }
+  .submit-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(22,35,46,0.28);
+  }
   .submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
   .form-note {
@@ -467,7 +596,19 @@
     border-radius: 8px;
     display: none;
   }
-  .toast.show { display: block; }
+  .toast.show {
+    display: block;
+    animation: toastIn 0.35s ease both;
+  }
+
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast.show { animation: none; }
+  }
   .toast.ok { background: var(--safe-bg); color: var(--safe); }
   .toast.err { background: var(--danger-bg); color: var(--danger); }
 
@@ -485,6 +626,7 @@
 
   <header class="topbar">
     <div class="topbar-left">
+      <a href="./landing.html" style="color:#9FB0AB; text-decoration:none; font-size:13px; margin-right:4px;">← 소개</a>
       <h1>탄천 6PPD-Q 위험도 모니터</h1>
       <span class="subtitle">여름철 집중호우 대비 조기경보 대시보드</span>
     </div>
@@ -544,8 +686,17 @@
       </div>
 
       <div class="tab-panel active" id="tab-list">
+        <div class="status-filters" id="statusFilters">
+          <button class="status-filter-btn active" data-status="">전체</button>
+          <button class="status-filter-btn" data-status="pending">접수</button>
+          <button class="status-filter-btn" data-status="reviewed">검토중</button>
+          <button class="status-filter-btn" data-status="resolved">처리완료</button>
+        </div>
         <div class="report-grid" id="reportGrid">
           <!-- JS로 채워짐 -->
+        </div>
+        <div style="text-align:center; margin-top:16px;">
+          <button class="submit-btn" id="loadMoreBtn" style="display:none;">더 보기</button>
         </div>
       </div>
 
@@ -572,34 +723,6 @@
           <button type="submit" class="submit-btn" id="submitBtn">제보 보내기</button>
           <div class="form-note">위경도는 대한민국 영역 안에서만 접수돼요.</div>
           <div class="toast" id="formToast"></div>
-        </form>
-      </div>
-    </section>
-
-    <section class="panel reports-panel">
-      <div class="panel-header">
-        <div>
-          <span class="eyebrow">관심 등록</span>
-          <h2>알림 구독</h2>
-        </div>
-      </div>
-      <div style="padding:18px 20px 22px;">
-        <form class="report-form" id="subForm">
-          <div class="field-row">
-            <div class="field">
-              <label for="subContact">연락처 (전화번호/이메일)</label>
-              <input type="text" id="subContact" name="contact" placeholder="01012345678" required />
-            </div>
-            <div class="field">
-              <label for="subRoad">관심 도로</label>
-              <select id="subRoad" name="road_id" required>
-                <option value="">불러오는 중…</option>
-              </select>
-            </div>
-          </div>
-          <button type="submit" class="submit-btn" id="subSubmitBtn">구독하기</button>
-          <div class="form-note">등록한 도로의 위험도가 오르면 담당 부서로 알림이 전달돼요.</div>
-          <div class="toast" id="subToast"></div>
         </form>
       </div>
     </section>
@@ -688,6 +811,14 @@
     markerLayer.clearLayers();
     roads.forEach((r) => {
       const level = riskLevel(r.risk_score);
+
+      if (level === 'danger') {
+        const halo = L.marker([r.lat, r.lon], {
+          icon: L.divIcon({ className: 'pulse-halo-icon', html: '<span class="pulse-halo"></span>', iconSize: [0, 0] }),
+          interactive: false,
+        }).addTo(markerLayer);
+      }
+
       const marker = L.circleMarker([r.lat, r.lon], {
         radius: 9 + r.risk_score / 12,
         color: colorFor(level),
@@ -701,14 +832,30 @@
     });
   }
 
+  function countUp(el, target, duration = 900) {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.textContent = target.toFixed(1);
+      return;
+    }
+    const start = performance.now();
+    function tick(now) {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+      el.textContent = (target * eased).toFixed(1);
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
   function renderGaugeList(roads) {
     const sorted = [...roads].sort((a, b) => b.risk_score - a.risk_score);
     const el = document.getElementById('gaugeList');
     el.innerHTML = '';
-    sorted.forEach((r) => {
+    sorted.forEach((r, i) => {
       const level = riskLevel(r.risk_score);
       const row = document.createElement('div');
       row.className = 'gauge-row';
+      row.style.animationDelay = `${i * 60}ms`;
       row.innerHTML = `
         <div class="gauge-row-top">
           <div>
@@ -716,7 +863,7 @@
             <div class="gauge-road-id">${r.road_id}</div>
           </div>
           <div style="text-align:right">
-            <div class="gauge-score">${r.risk_score.toFixed(1)}</div>
+            <div class="gauge-score" data-score="${r.risk_score}">0.0</div>
             <span class="badge ${level}">${riskLabel(level)}</span>
           </div>
         </div>
@@ -731,27 +878,37 @@
       el.querySelectorAll('.gauge-fill').forEach((f) => {
         f.style.width = f.dataset.target + '%';
       });
+      el.querySelectorAll('.gauge-score').forEach((s) => {
+        countUp(s, Number(s.dataset.score));
+      });
     });
   }
 
-  function renderReports(reports) {
+  function renderReports(reports, append = false) {
     const grid = document.getElementById('reportGrid');
-    if (!reports.length) {
+    if (!append) grid.innerHTML = '';
+
+    if (!reports.length && !append) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
         <strong>아직 들어온 제보가 없어요</strong>
         현장에서 이상 징후를 발견하면 '제보하기' 탭에서 알려주세요.
       </div>`;
       return;
     }
-    grid.innerHTML = '';
-    reports.forEach((r) => {
+
+    reports.forEach((r, i) => {
       const card = document.createElement('div');
       card.className = 'report-card';
+      card.style.animationDelay = `${i * 50}ms`;
+      const imageHtml = r.image_path
+        ? `<img src="${API_BASE}/${r.image_path}" alt="제보 사진" style="width:100%; border-radius:8px; margin-bottom:10px; max-height:140px; object-fit:cover;" />`
+        : '';
       card.innerHTML = `
         <div class="report-card-top">
           <span class="report-status ${r.status}">${{pending:'접수', reviewed:'검토중', resolved:'처리완료'}[r.status] || r.status}</span>
           <span class="report-coords">${timeAgo(r.reported_at)}</span>
         </div>
+        ${imageHtml}
         <p class="report-desc">${r.description ? escapeHtml(r.description) : '작성된 설명이 없어요.'}</p>
         <div class="report-coords">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div>
       `;
@@ -775,9 +932,10 @@
       return;
     }
     el.innerHTML = '';
-    docs.forEach((d) => {
+    docs.forEach((d, i) => {
       const card = document.createElement('div');
       card.className = 'doc-card';
+      card.style.animationDelay = `${i * 50}ms`;
       card.innerHTML = `
         <div class="doc-info">
           <div class="doc-road">
@@ -803,25 +961,6 @@
     }
   }
 
-  async function populateRoadSelect() {
-    const select = document.getElementById('subRoad');
-    let roads = MOCK_ROADS;
-    try {
-      const res = await fetch(`${API_BASE}/risk/roads`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.length) roads = data;
-      }
-    } catch (e) { /* MOCK_ROADS 사용 */ }
-
-    select.innerHTML = '';
-    roads.forEach((r) => {
-      const opt = document.createElement('option');
-      opt.value = r.road_id;
-      opt.textContent = `${r.road_name} (${r.road_id})`;
-      select.appendChild(opt);
-    });
-  }
   function showConnBanner(show) {
     document.getElementById('connBanner').classList.toggle('show', show);
   }
@@ -851,14 +990,24 @@
     }
   }
 
-  async function loadReports() {
+  let currentStatusFilter = '';
+  let currentOffset = 0;
+  const PAGE_SIZE = 20;
+
+  async function loadReports(append = false) {
+    if (!append) currentOffset = 0;
     try {
-      const res = await fetch(`${API_BASE}/reports/`);
+      const params = new URLSearchParams({ limit: PAGE_SIZE, offset: currentOffset });
+      if (currentStatusFilter) params.set('status_filter', currentStatusFilter);
+      const res = await fetch(`${API_BASE}/reports/?${params}`);
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
-      renderReports(data.length ? data : []);
+      renderReports(data.items, append);
+      document.getElementById('loadMoreBtn').style.display = data.has_more ? 'inline-block' : 'none';
+      currentOffset += data.items.length;
     } catch (e) {
-      renderReports(MOCK_REPORTS);
+      if (!append) renderReports(MOCK_REPORTS, false);
+      document.getElementById('loadMoreBtn').style.display = 'none';
     }
   }
 
@@ -917,41 +1066,20 @@
     }
   });
 
-  document.getElementById('subForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = document.getElementById('subSubmitBtn');
-    const toast = document.getElementById('subToast');
-    toast.className = 'toast';
+  document.getElementById('statusFilters').addEventListener('click', (e) => {
+    if (!e.target.classList.contains('status-filter-btn')) return;
+    document.querySelectorAll('.status-filter-btn').forEach((b) => b.classList.remove('active'));
+    e.target.classList.add('active');
+    currentStatusFilter = e.target.dataset.status;
+    loadReports(false);
+  });
 
-    const contact = document.getElementById('subContact').value;
-    const road_id = document.getElementById('subRoad').value;
-
-    btn.disabled = true;
-    btn.textContent = '등록하는 중…';
-
-    try {
-      const res = await fetch(`${API_BASE}/subscriptions/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact, road_id }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.detail || '등록에 실패했어요');
-      toast.textContent = '구독이 등록됐어요.';
-      toast.className = 'toast show ok';
-      e.target.reset();
-    } catch (err) {
-      toast.textContent = typeof err.message === 'string' ? err.message : '등록에 실패했어요. 잠시 후 다시 시도해주세요.';
-      toast.className = 'toast show err';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '구독하기';
-    }
+  document.getElementById('loadMoreBtn').addEventListener('click', () => {
+    loadReports(true);
   });
 
   initMap();
   refreshAll();
-  populateRoadSelect();
   loadDocuments();
   setInterval(refreshAll, 60000); // 1분마다 자동 갱신 (10분 배치 주기에 맞춘 여유 있는 폴링)
 </script>

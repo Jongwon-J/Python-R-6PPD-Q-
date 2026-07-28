@@ -18,3 +18,6 @@ DATABASE_URL = os.getenv(
 
 # 시민 제보 이미지 저장 경로
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads/reports")
+
+# 제보 상태 변경(관리자 작업) 시 요구하는 간단한 토큰. 정식 로그인 시스템 대신 최소한의 접근 제어.
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")

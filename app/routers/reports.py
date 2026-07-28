@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import UPLOAD_DIR
 from app.database import get_db
 from app.models import CitizenReport
-from app.schemas import ReportListItem, ReportResponse
+from app.schemas import ReportListItem, ReportResponse, ReportListResponse
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -88,13 +88,35 @@ def create_report(
     return new_report
 
 
-@router.get("/", response_model=List[ReportListItem])
-def list_reports(limit: int = 20, db: Session = Depends(get_db)):
-    """최근 제보 목록 조회 (디버깅/관리자 확인용)"""
+@router.get("/", response_model=ReportListResponse)
+def list_reports(
+    limit: int = 20,
+    offset: int = 0,
+    status_filter: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    제보 목록 조회 (상태 필터 + 페이지네이션 지원).
+
+    - status_filter: 'pending' | 'reviewed' | 'resolved' 중 하나로 필터링 (생략 시 전체)
+    - limit/offset: 20개씩 페이지네이션
+    """
+    query = db.query(CitizenReport)
+    if status_filter:
+        query = query.filter(CitizenReport.status == status_filter)
+
+    total = query.count()
     reports = (
-        db.query(CitizenReport)
-        .order_by(CitizenReport.reported_at.desc())
+        query.order_by(CitizenReport.reported_at.desc())
+        .offset(offset)
         .limit(limit)
         .all()
     )
-    return reports
+
+    return {
+        "items": reports,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }

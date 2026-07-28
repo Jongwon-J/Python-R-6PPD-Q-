@@ -360,6 +360,30 @@
     grid-column: 1 / -1;
   }
 
+  .status-filters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .status-filter-btn {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-soft);
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .status-filter-btn.active {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+  }
+
   .tabs {
     display: flex;
     gap: 4px;
@@ -662,8 +686,17 @@
       </div>
 
       <div class="tab-panel active" id="tab-list">
+        <div class="status-filters" id="statusFilters">
+          <button class="status-filter-btn active" data-status="">전체</button>
+          <button class="status-filter-btn" data-status="pending">접수</button>
+          <button class="status-filter-btn" data-status="reviewed">검토중</button>
+          <button class="status-filter-btn" data-status="resolved">처리완료</button>
+        </div>
         <div class="report-grid" id="reportGrid">
           <!-- JS로 채워짐 -->
+        </div>
+        <div style="text-align:center; margin-top:16px;">
+          <button class="submit-btn" id="loadMoreBtn" style="display:none;">더 보기</button>
         </div>
       </div>
 
@@ -851,25 +884,31 @@
     });
   }
 
-  function renderReports(reports) {
+  function renderReports(reports, append = false) {
     const grid = document.getElementById('reportGrid');
-    if (!reports.length) {
+    if (!append) grid.innerHTML = '';
+
+    if (!reports.length && !append) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
         <strong>아직 들어온 제보가 없어요</strong>
         현장에서 이상 징후를 발견하면 '제보하기' 탭에서 알려주세요.
       </div>`;
       return;
     }
-    grid.innerHTML = '';
+
     reports.forEach((r, i) => {
       const card = document.createElement('div');
       card.className = 'report-card';
       card.style.animationDelay = `${i * 50}ms`;
+      const imageHtml = r.image_path
+        ? `<img src="${API_BASE}/${r.image_path}" alt="제보 사진" style="width:100%; border-radius:8px; margin-bottom:10px; max-height:140px; object-fit:cover;" />`
+        : '';
       card.innerHTML = `
         <div class="report-card-top">
           <span class="report-status ${r.status}">${{pending:'접수', reviewed:'검토중', resolved:'처리완료'}[r.status] || r.status}</span>
           <span class="report-coords">${timeAgo(r.reported_at)}</span>
         </div>
+        ${imageHtml}
         <p class="report-desc">${r.description ? escapeHtml(r.description) : '작성된 설명이 없어요.'}</p>
         <div class="report-coords">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div>
       `;
@@ -951,14 +990,24 @@
     }
   }
 
-  async function loadReports() {
+  let currentStatusFilter = '';
+  let currentOffset = 0;
+  const PAGE_SIZE = 20;
+
+  async function loadReports(append = false) {
+    if (!append) currentOffset = 0;
     try {
-      const res = await fetch(`${API_BASE}/reports/`);
+      const params = new URLSearchParams({ limit: PAGE_SIZE, offset: currentOffset });
+      if (currentStatusFilter) params.set('status_filter', currentStatusFilter);
+      const res = await fetch(`${API_BASE}/reports/?${params}`);
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
-      renderReports(data.length ? data : []);
+      renderReports(data.items, append);
+      document.getElementById('loadMoreBtn').style.display = data.has_more ? 'inline-block' : 'none';
+      currentOffset += data.items.length;
     } catch (e) {
-      renderReports(MOCK_REPORTS);
+      if (!append) renderReports(MOCK_REPORTS, false);
+      document.getElementById('loadMoreBtn').style.display = 'none';
     }
   }
 
@@ -1015,6 +1064,18 @@
       btn.disabled = false;
       btn.textContent = '제보 보내기';
     }
+  });
+
+  document.getElementById('statusFilters').addEventListener('click', (e) => {
+    if (!e.target.classList.contains('status-filter-btn')) return;
+    document.querySelectorAll('.status-filter-btn').forEach((b) => b.classList.remove('active'));
+    e.target.classList.add('active');
+    currentStatusFilter = e.target.dataset.status;
+    loadReports(false);
+  });
+
+  document.getElementById('loadMoreBtn').addEventListener('click', () => {
+    loadReports(true);
   });
 
   initMap();

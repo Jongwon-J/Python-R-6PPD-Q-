@@ -27,15 +27,16 @@ class ReportListItem(BaseModel):
     lat: float
     lon: float
     description: Optional[str] = None
+    image_path: Optional[str] = None
     status: str
     reported_at: datetime
-    
-class SubscriptionResponse(BaseModel):
-    """구독 생성 후 응답 형태"""
 
-    model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    contact: str
-    road_id: str
-    created_at: datetime
+class ReportListResponse(BaseModel):
+    """페이지네이션 정보를 포함한 제보 목록 응답"""
+
+    items: list[ReportListItem]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool

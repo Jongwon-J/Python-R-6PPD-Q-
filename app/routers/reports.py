@@ -2,10 +2,11 @@ import os
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
-from app.config import UPLOAD_DIR
+from app.config import ADMIN_TOKEN, UPLOAD_DIR
 from app.database import get_db
 from app.models import CitizenReport
 from app.schemas import ReportListItem, ReportResponse, ReportListResponse
@@ -120,3 +121,47 @@ def list_reports(
         "offset": offset,
         "has_more": offset + limit < total,
     }
+
+VALID_STATUSES = {"pending", "reviewed", "resolved"}
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+def _require_admin(x_admin_token: Optional[str]) -> None:
+    """제보 상태 변경 같은 관리 작업 전에 토큰을 검증. ADMIN_TOKEN이 설정 안 됐으면 안전하게 항상 차단."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="서버에 ADMIN_TOKEN이 설정되지 않아 관리 기능을 쓸 수 없습니다.",
+        )
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="관리자 토큰이 올바르지 않습니다.")
+
+
+@router.patch("/{report_id}/status", response_model=ReportResponse)
+def update_report_status(
+    report_id: int,
+    payload: StatusUpdate,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """제보 상태 변경 (접수 → 검토중 → 처리완료). 관리자 토큰이 있어야 허용."""
+    _require_admin(x_admin_token)
+
+    if payload.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status는 {', '.join(VALID_STATUSES)} 중 하나여야 합니다.",
+        )
+
+    report = db.query(CitizenReport).filter(CitizenReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail=f"id={report_id} 제보를 찾을 수 없습니다.")
+
+    report.status = payload.status
+    db.commit()
+    db.refresh(report)
+    return report
+    

@@ -686,11 +686,14 @@
       </div>
 
       <div class="tab-panel active" id="tab-list">
-        <div class="status-filters" id="statusFilters">
-          <button class="status-filter-btn active" data-status="">전체</button>
-          <button class="status-filter-btn" data-status="pending">접수</button>
-          <button class="status-filter-btn" data-status="reviewed">검토중</button>
-          <button class="status-filter-btn" data-status="resolved">처리완료</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+          <div class="status-filters" id="statusFilters" style="margin-bottom:0;">
+            <button class="status-filter-btn active" data-status="">전체</button>
+            <button class="status-filter-btn" data-status="pending">접수</button>
+            <button class="status-filter-btn" data-status="reviewed">검토중</button>
+            <button class="status-filter-btn" data-status="resolved">처리완료</button>
+          </div>
+          <button id="adminToggleBtn" style="font-size:12px; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); padding:6px 12px; border-radius:999px; cursor:pointer;">🔒 관리자 모드</button>
         </div>
         <div class="report-grid" id="reportGrid">
           <!-- JS로 채워짐 -->
@@ -903,6 +906,13 @@
       const imageHtml = r.image_path
         ? `<img src="${API_BASE}/${r.image_path}" alt="제보 사진" style="width:100%; border-radius:8px; margin-bottom:10px; max-height:140px; object-fit:cover;" />`
         : '';
+      const statusSelectHtml = isAdminMode
+        ? `<select class="status-select" data-id="${r.id}" style="margin-top:8px; width:100%; font-size:12px; padding:5px; border-radius:6px; border:1px solid var(--line);">
+          <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>접수</option>
+          <option value="reviewed" ${r.status === 'reviewed' ? 'selected' : ''}>검토중</option>
+          <option value="resolved" ${r.status === 'resolved' ? 'selected' : ''}>처리완료</option>
+        </select>`
+        : '';
       card.innerHTML = `
         <div class="report-card-top">
           <span class="report-status ${r.status}">${{pending:'접수', reviewed:'검토중', resolved:'처리완료'}[r.status] || r.status}</span>
@@ -911,6 +921,7 @@
         ${imageHtml}
         <p class="report-desc">${r.description ? escapeHtml(r.description) : '작성된 설명이 없어요.'}</p>
         <div class="report-coords">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div>
+        ${statusSelectHtml}
       `;
       grid.appendChild(card);
     });
@@ -1077,6 +1088,61 @@
   document.getElementById('loadMoreBtn').addEventListener('click', () => {
     loadReports(true);
   });
+
+  let isAdminMode = false;
+  let adminToken = sessionStorage.getItem('adminToken') || '';
+
+  function setAdminButtonLabel() {
+    const btn = document.getElementById('adminToggleBtn');
+    btn.textContent = isAdminMode ? '🔓 관리자 모드 (끄기)' : '🔒 관리자 모드';
+  }
+
+  document.getElementById('adminToggleBtn').addEventListener('click', () => {
+    if (isAdminMode) {
+      isAdminMode = false;
+      adminToken = '';
+      sessionStorage.removeItem('adminToken');
+    } else {
+      const input = prompt('관리자 비밀번호를 입력하세요');
+      if (!input) return;
+      adminToken = input;
+      sessionStorage.setItem('adminToken', input);
+      isAdminMode = true;
+    }
+    setAdminButtonLabel();
+    loadReports(false);
+  });
+
+  document.getElementById('reportGrid').addEventListener('change', async (e) => {
+    if (!e.target.classList.contains('status-select')) return;
+    const id = e.target.dataset.id;
+    const newStatus = e.target.value;
+    try {
+      const res = await fetch(`${API_BASE}/reports/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.status === 401) {
+        alert('관리자 비밀번호가 올바르지 않아요. 관리자 모드를 다시 켜주세요.');
+        isAdminMode = false;
+        adminToken = '';
+        sessionStorage.removeItem('adminToken');
+        setAdminButtonLabel();
+        loadReports(false);
+        return;
+      }
+      if (!res.ok) throw new Error('업데이트 실패');
+      loadReports(false);
+    } catch (err) {
+      alert('상태 변경에 실패했어요. 다시 시도해주세요.');
+    }
+  });
+
+  if (adminToken) {
+    isAdminMode = true;
+    setAdminButtonLabel();
+  }
 
   initMap();
   refreshAll();

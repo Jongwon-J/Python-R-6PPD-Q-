@@ -23,6 +23,7 @@ def get_latest_risk_by_road(db: Session = Depends(get_db)):
             rm.lat,
             rm.lon,
             r.risk_score,
+            r.risk_grade,
             r.calc_datetime
         FROM processed_risk_log r
         JOIN road_master rm ON rm.road_id = r.road_id

@@ -25,6 +25,8 @@
     --watch-bg: #FBF0DC;
     --danger: #B23A32;
     --danger-bg: #F7E4E1;
+    --alert: #A24B2E;
+    --alert-bg: #FBE3DC;
     --radius: 14px;
     --shadow: 0 1px 2px rgba(22,35,46,0.04), 0 8px 24px rgba(22,35,46,0.06);
   }
@@ -317,9 +319,10 @@
     .gauge-fill::after { animation: none; display: none; }
   }
 
-  .gauge-fill.safe { background: linear-gradient(90deg, #2A9D8F, #4FD1B5); }
-  .gauge-fill.watch { background: linear-gradient(90deg, #C98A1F, #F0B94B); }
-  .gauge-fill.danger { background: linear-gradient(90deg, #B23A32, #E85D52); }
+  .gauge-fill.관심 { background: linear-gradient(90deg, #2A9D8F, #4FD1B5); }
+  .gauge-fill.주의 { background: linear-gradient(90deg, #C98A1F, #F0B94B); }
+  .gauge-fill.경계 { background: linear-gradient(90deg, #A24B2E, #D97A54); }
+  .gauge-fill.심각 { background: linear-gradient(90deg, #B23A32, #E85D52); }
 
   .badge {
     font-size: 11px;
@@ -329,9 +332,10 @@
     white-space: nowrap;
     transition: transform 0.15s ease;
   }
-  .badge.safe { background: var(--safe-bg); color: var(--safe); box-shadow: 0 0 0 1px rgba(42,157,143,0.15); }
-  .badge.watch { background: var(--watch-bg); color: var(--watch); box-shadow: 0 0 0 1px rgba(201,138,31,0.18); }
-  .badge.danger {
+  .badge.관심 { background: var(--safe-bg); color: var(--safe); box-shadow: 0 0 0 1px rgba(42,157,143,0.15); }
+  .badge.주의 { background: var(--watch-bg); color: var(--watch); box-shadow: 0 0 0 1px rgba(201,138,31,0.18); }
+  .badge.경계 { background: var(--alert-bg); color: var(--alert); box-shadow: 0 0 0 1px rgba(162,75,46,0.2); }
+  .badge.심각 {
     background: var(--danger-bg);
     color: var(--danger);
     box-shadow: 0 0 0 1px rgba(178,58,50,0.2), 0 0 10px rgba(178,58,50,0.25);
@@ -344,7 +348,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .badge.danger { animation: none; }
+    .badge.심각 { animation: none; }
   }
 
   .gauge-meta {
@@ -655,9 +659,10 @@
       </div>
       <div id="map"></div>
       <div class="legend">
-        <span class="legend-item"><span class="legend-dot" style="background:var(--safe)"></span>안전 (0–33)</span>
-        <span class="legend-item"><span class="legend-dot" style="background:var(--watch)"></span>주의 (34–66)</span>
-        <span class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span>위험 (67–100)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--safe)"></span>관심 (0–33.5)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--watch)"></span>주의 (33.5–40.5)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--alert)"></span>경계 (40.5–49.9)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span>심각 (49.9–100)</span>
       </div>
     </section>
 
@@ -750,25 +755,25 @@
     : window.location.origin;
 
   const MOCK_ROADS = [
-    { road_id: '8902208', road_name: '남부순환로', lat: 37.491879, lon: 127.088069, risk_score: 78.1, calc_datetime: null },
-    { road_id: '8901921', road_name: '테헤란로',   lat: 37.511263, lon: 127.046071, risk_score: 59.5, calc_datetime: null },
-    { road_id: '1092198', road_name: '언주로',     lat: 37.483728, lon: 127.046384, risk_score: 48.6, calc_datetime: null },
-    { road_id: '8901760', road_name: '강남대로',   lat: 37.495428, lon: 127.033201, risk_score: 43.6, calc_datetime: null },
-    { road_id: '8901675', road_name: '남부순환로',   lat: 37.479783, lon: 126.985578, risk_score: 21.4, calc_datetime: null },
+    { road_id: '8902208', road_name: '남부순환로', gu: '강남구', lat: 37.491879, lon: 127.088069, risk_score: 78.1, risk_grade: '심각', calc_datetime: null },
+    { road_id: '8901921', road_name: '테헤란로',   gu: '강남구', lat: 37.511263, lon: 127.046071, risk_score: 59.5, risk_grade: '심각', calc_datetime: null },
+    { road_id: '1092198', road_name: '언주로',     gu: '강남구', lat: 37.483728, lon: 127.046384, risk_score: 48.6, risk_grade: '경계', calc_datetime: null },
+    { road_id: '8901760', road_name: '강남대로',   gu: '강남구', lat: 37.495428, lon: 127.033201, risk_score: 43.6, risk_grade: '경계', calc_datetime: null },
+    { road_id: '8901675', road_name: '남부순환로', gu: '서초구', lat: 37.479783, lon: 126.985578, risk_score: 21.4, risk_grade: '관심', calc_datetime: null },
   ];
 
   const MOCK_REPORTS = [
     { id: 1, description: '탄천 인근 기름띠 발견', lat: 37.4988, lon: 127.0349, status: 'pending', reported_at: new Date().toISOString() },
   ];
 
-  function riskLevel(score) {
-    if (score >= 67) return 'danger';
-    if (score >= 34) return 'watch';
-    return 'safe';
+  // 등급은 백엔드(risk_formula.classify_risk_grade)가 계산한 값을 그대로 씀 — 프론트에서
+  // 점수만 보고 다시 나누지 않음(윤서가 정한 4단계 경계값과 어긋나는 걸 방지).
+  function riskLevel(road) {
+    return road.risk_grade || '관심';
   }
 
   function riskLabel(level) {
-    return { safe: '안전', watch: '주의', danger: '위험' }[level];
+    return level;
   }
 
   function fmtTime(iso) {
@@ -808,16 +813,16 @@
   }
 
   function colorFor(level) {
-    return { safe: '#2A9D8F', watch: '#C98A1F', danger: '#B23A32' }[level];
+    return { 관심: '#2A9D8F', 주의: '#C98A1F', 경계: '#A24B2E', 심각: '#B23A32' }[level];
   }
 
   function renderMap(roads) {
     if (!mapReady) return;
     markerLayer.clearLayers();
     roads.forEach((r) => {
-      const level = riskLevel(r.risk_score);
+      const level = riskLevel(r);
 
-      if (level === 'danger') {
+      if (level === '심각') {
         const halo = L.marker([r.lat, r.lon], {
           icon: L.divIcon({ className: 'pulse-halo-icon', html: '<span class="pulse-halo"></span>', iconSize: [0, 0] }),
           interactive: false,
@@ -831,8 +836,9 @@
         fillColor: colorFor(level),
         fillOpacity: 0.55,
       }).addTo(markerLayer);
+      const roadLabel = r.gu ? `${r.road_name} (${r.gu})` : r.road_name;
       marker.bindPopup(
-        `<strong>${r.road_name}</strong><br/>위험도 ${r.risk_score.toFixed(1)} · ${riskLabel(level)}<br/><span style="color:#5B6B72;font-size:11px">${fmtTime(r.calc_datetime)}</span>`
+        `<strong>${roadLabel}</strong><br/>위험도 ${r.risk_score.toFixed(1)} · ${riskLabel(level)}<br/><span style="color:#5B6B72;font-size:11px">${fmtTime(r.calc_datetime)}</span>`
       );
     });
   }
@@ -857,14 +863,14 @@
     const el = document.getElementById('gaugeList');
     el.innerHTML = '';
     sorted.forEach((r, i) => {
-      const level = riskLevel(r.risk_score);
+      const level = riskLevel(r);
       const row = document.createElement('div');
       row.className = 'gauge-row';
       row.style.animationDelay = `${i * 60}ms`;
       row.innerHTML = `
         <div class="gauge-row-top">
           <div>
-            <div class="gauge-road-name">${r.road_name}</div>
+            <div class="gauge-road-name">${r.road_name}${r.gu ? ` <span style="font-weight:400; color:var(--ink-soft); font-size:12px;">(${r.gu})</span>` : ''}</div>
             <div class="gauge-road-id">${r.road_id}</div>
           </div>
           <div style="text-align:right">

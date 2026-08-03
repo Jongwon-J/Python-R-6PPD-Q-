@@ -25,3 +25,11 @@ app.include_router(documents.router)
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "서버가 살아있습니다"}
+
+# 프론트엔드(대시보드/랜딩페이지)를 백엔드와 같은 서버에서 서빙.
+# 배포 환경에서 별도 서버 없이 이 FastAPI 하나로 전체 서비스가 뜨게 하기 위함.
+# API 라우터들을 먼저 등록한 뒤에 mount해야, "/"로 들어오는 정적 파일 요청이
+# API 경로들과 충돌하지 않음.
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

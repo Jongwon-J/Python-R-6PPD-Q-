@@ -1,13 +1,3 @@
-"""
-weather_collector.py - 실시간 강수량 수집기
-기상청 단기예보 조회서비스 - 초단기실황조회(getUltraSrtNcst) API 연동
-탄천 유역 실시간 시간당 강수량(RN1) 등을 수집하여 PostgreSQL weather_raw 테이블에 적재합니다.
-
-API 문서: 공공데이터포털 "기상청_단기예보 조회서비스"
-Endpoint: https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst
-
-"""
-
 import os # 환경변수 읽을 때 사용
 import sys
 import json

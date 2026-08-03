@@ -4,7 +4,7 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 1) weather_raw : 기상청 초단기실황조회(getUltraSrtNcst) 원천 데이터
+-- 1) weather_raw : 기상청 API로 받은 강수/기상 데이터
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS weather_raw (
     id              BIGSERIAL PRIMARY KEY,      -- 번호 식별자
@@ -28,10 +28,6 @@ CREATE INDEX IF NOT EXISTS idx_weather_raw_nx_ny ON weather_raw (nx, ny);
 
 -- ----------------------------------------------------------------------------
 -- 2) road_master : 도로 마스터 데이터
---    tancheon_week2_final.csv 컬럼(도로ID,도로명,행정동,소속구,도로연장_km,차선수,
---    AADT_대일_평일,불투수면비율_퍼센트,기준년도,출처_AADT,출처_불투수면)을 그대로 반영.
---    lat/lon/nx/ny는 geocode_and_import_road_master.py가 CSV를 적재한 "이후"
---    지오코딩으로 채우는 값이라 처음엔 NULL일 수 있음 (그래서 NOT NULL 아님).
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS road_master (
     road_id             VARCHAR(50) PRIMARY KEY,
@@ -55,13 +51,10 @@ CREATE TABLE IF NOT EXISTS road_master (
 );
 
 CREATE INDEX IF NOT EXISTS idx_road_master_nx_ny ON road_master (nx, ny);
-
--- 이미 만들어진 테이블에도 안전하게 컬럼을 추가 (CREATE TABLE IF NOT EXISTS는 기존 테이블을
--- 수정하지 않으므로, schema.sql을 다시 실행해도 tributary가 없으면 여기서 추가됩니다).
 ALTER TABLE road_master ADD COLUMN IF NOT EXISTS tributary VARCHAR(50);
 
 -- ----------------------------------------------------------------------------
--- 3) dry_days_status : 선행 무강우일수(Antecedent Dry Days) 계산 결과
+-- 3) dry_days_status : 선행 무강우일수 계산 결과
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dry_days_status (
     obs_date               DATE NOT NULL,
@@ -75,9 +68,7 @@ CREATE TABLE IF NOT EXISTS dry_days_status (
 );
 
 -- ----------------------------------------------------------------------------
--- 4) processed_risk_log : 위험도 산식(risk_formula.py) 계산 결과
---    aadt_norm ~ runoff_index는 최종 risk_score만 남기지 않고 중간값도 같이 저장해서,
---    "왜 이 점수가 나왔는지" 나중에 디버깅/검증할 수 있게 함.
+-- 4) processed_risk_log : 위험도 산식 계산 결과
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS processed_risk_log (
     id                  BIGSERIAL PRIMARY KEY,
@@ -100,13 +91,10 @@ CREATE TABLE IF NOT EXISTS processed_risk_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_processed_risk_log_calc_datetime ON processed_risk_log (calc_datetime);
-
--- 이미 만들어진 테이블에도 안전하게 컬럼을 추가 (CREATE TABLE IF NOT EXISTS는 기존 테이블을
--- 수정하지 않으므로, schema.sql을 다시 실행해도 risk_grade가 없으면 여기서 추가됩니다).
 ALTER TABLE processed_risk_log ADD COLUMN IF NOT EXISTS risk_grade VARCHAR(10);
 
 -- ----------------------------------------------------------------------------
--- 5) citizen_reports : 시민 제보 (3주차, 백엔드 담당)
+-- 5) citizen_reports : 시민 제보
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS citizen_reports (
     id              BIGSERIAL PRIMARY KEY,
@@ -114,7 +102,7 @@ CREATE TABLE IF NOT EXISTS citizen_reports (
     lon             NUMERIC(9,6) NOT NULL,      -- 제보 위치 경도
     description     TEXT,                       -- 시민이 작성한 제보 내용
     image_path      VARCHAR(500),                -- 업로드된 사진 저장 경로
-    road_id         VARCHAR(50) REFERENCES road_master(road_id),  -- 인근 도로 매칭 (nullable)
+    road_id         VARCHAR(50) REFERENCES road_master(road_id),  -- 인근 도로 매칭
     status          VARCHAR(20) NOT NULL DEFAULT 'pending',       -- pending / reviewed / resolved
     reported_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -124,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_citizen_reports_reported_at ON citizen_reports (r
 CREATE INDEX IF NOT EXISTS idx_citizen_reports_status ON citizen_reports (status);
 
 -- ----------------------------------------------------------------------------
--- 6) subscriptions : 관심 도로/하천 알림 구독 (4주차, 백엔드 담당)
+-- 6) subscriptions : 관심 도로/하천 알림 구독
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS subscriptions (
     id              BIGSERIAL PRIMARY KEY,
@@ -138,21 +126,18 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_road_id ON subscriptions (road_id);
 
 -- ----------------------------------------------------------------------------
 -- 7) risk_alert_log : 위험도 등급이 상승(임계치 도달)한 순간을 기록하는 트리거 로그
---    (CrewAI 자동 트리거 파이프라인이 "무엇을 보고 발동했는지" 추적하기 위한 테이블)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_alert_log (
     id                  BIGSERIAL PRIMARY KEY,
     road_id             VARCHAR(50) REFERENCES road_master(road_id),
-    calc_datetime        TIMESTAMP NOT NULL,       -- 등급이 상승한 시점의 계산 시각 (processed_risk_log 참조)
+    calc_datetime        TIMESTAMP NOT NULL,       -- 등급이 상승한 시점의 계산 시각
     prev_grade           VARCHAR(10),               -- 직전 등급 (없으면 NULL = 최초 계산)
     new_grade             VARCHAR(10) NOT NULL,      -- 상승한 새 등급
     risk_score            NUMERIC(5,2) NOT NULL,
     notified               BOOLEAN NOT NULL DEFAULT false,  -- CrewAI 에이전트 호출 여부
-    document_text           TEXT,                    -- CrewAI가 생성한 최종 경보 공문서 전문 (대시보드 표시용)
+    document_text           TEXT,                    -- CrewAI가 생성한 최종 경보 공문서 담당 (대시보드 표시용)
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_risk_alert_log_road_id ON risk_alert_log (road_id);
-
--- 이미 만들어진 테이블에도 안전하게 컬럼을 추가.
 ALTER TABLE risk_alert_log ADD COLUMN IF NOT EXISTS document_text TEXT;

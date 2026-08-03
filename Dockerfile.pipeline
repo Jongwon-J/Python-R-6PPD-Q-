@@ -5,8 +5,12 @@ FROM python:3.12-slim
 
 WORKDIR /pipeline
 
+# Render 서버는 기본 UTC라, 한국 시간(KST) 기준으로 기상청 API를 호출하려면
+# 컨테이너 시간대를 명시적으로 Asia/Seoul로 맞춰줘야 함.
+ENV TZ=Asia/Seoul
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev gcc \
+    libpq-dev gcc tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 COPY data_pipeline/requirements.txt ./requirements.txt

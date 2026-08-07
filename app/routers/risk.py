@@ -20,6 +20,7 @@ def get_latest_risk_by_road(db: Session = Depends(get_db)):
         SELECT
             r.road_id,
             rm.road_name,
+            rm.gu,
             rm.lat,
             rm.lon,
             r.risk_score,

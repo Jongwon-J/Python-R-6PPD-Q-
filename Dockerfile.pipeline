@@ -1,0 +1,21 @@
+# --- EcoBridge-6PPDQ 데이터 파이프라인 이미지 (Render Cron Job용) ---
+# weather_collector.py -> etl_risk_pipeline.py 를 순서대로 실행.
+# crew_alert_agent.py(Gemini API 필요)는 아직 키가 없어서 이 크론에서는 제외.
+FROM python:3.12-slim
+
+WORKDIR /pipeline
+
+# Render 서버는 기본 UTC라, 한국 시간(KST) 기준으로 기상청 API를 호출하려면
+# 컨테이너 시간대를 명시적으로 Asia/Seoul로 맞춰줘야 함.
+ENV TZ=Asia/Seoul
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY data_pipeline/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY data_pipeline/ ./
+
+CMD ["sh", "-c", "python weather_collector.py && python dry_days_logic.py backfill --end-date $(date +%Y-%m-%d) && python etl_risk_pipeline.py"]

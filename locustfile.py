@@ -13,9 +13,6 @@ import random
 from locust import HttpUser, task, between
 
 
-SAMPLE_ROAD_IDS = ["8901760", "8902208", "8901921", "1092198", "8901675"]
-
-
 class DashboardUser(HttpUser):
     """대시보드를 보는 일반 사용자 시나리오. 조회가 대부분, 쓰기는 드물게."""
 
@@ -50,14 +47,4 @@ class DashboardUser(HttpUser):
                 "lon": lon,
                 "description": "부하 테스트 자동 생성 제보",
             },
-        )
-
-    @task(1)
-    def subscribe(self):
-        """구독 등록 — 매번 다른 연락처로 시도해 409 중복 에러를 피함"""
-        contact = f"010{random.randint(10000000, 99999999)}"
-        road_id = random.choice(SAMPLE_ROAD_IDS)
-        self.client.post(
-            "/subscriptions/",
-            json={"contact": contact, "road_id": road_id},
         )

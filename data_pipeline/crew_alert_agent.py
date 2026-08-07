@@ -1,32 +1,11 @@
 """
-crew_alert_agent.py - CrewAI 기반 위험도 알림 리포팅 에이전트
+risk_alert_log의 미처리(notified=false) 등급 상승 이벤트를 행정 공문서 양식으로 변환하고
+SMS로 발송하는 CrewAI 에이전트.
 
-역할:
-    etl_risk_pipeline.py가 위험도 등급 상승을 감지해 risk_alert_log에 남겨둔 이벤트(notified=false)를
-    읽어서, 윤서가 설계한 행정 공문서 표준 양식("Week4_행정공문서_양식_및_프롬프트가이드")에 맞춰
-    경보 문서를 자동 생성하고 notified=true로 표시합니다.
+환각 방지: 문서번호/수신/위험도점수 등 사실 필드는 전부 Python이 DB 값으로 직접 채우고
+(render_document), LLM에게는 등급별 "권고 조치사항" 두 문장만 생성하도록 범위를 좁혔다.
 
-설계 원칙 (환각 방지):
-    문서번호/수신/시행일시/지점/위험도점수/AADT/불투수면비율 같은 "숫자·사실 필드"는 전부 DB 값을
-    Python에서 직접 채워넣습니다 (render_document). LLM에게는 이 필드들을 절대 주지 않고, 오직
-    등급별 "권고 조치사항" 두 문장(행정용/시민용)만 생성하도록 범위를 좁혔습니다. 윤서의 환각 방지
-    가이드 1번("제공된 수치 외 추측 금지")을 프롬프트로 부탁하는 대신, LLM이 애초에 숫자를 건드릴
-    수 없는 구조로 강제한 것입니다.
-
-주의:
-    이 에이전트는 "위험도 계산 정확도"를 개선하지 않습니다 (그건 risk_formula.py의 역할).
-    여기서 하는 일은 이미 계산이 끝난 값을 정해진 공문서 양식으로 바꿔주는 리포팅 레이어입니다.
-
-LLM:
-    Google Gemini를 사용합니다 (gemini-3.5-flash, 무료 티어). GEMINI_API_KEY가 필요하며,
-    aistudio.google.com에서 카드 등록 없이 무료로 발급받을 수 있습니다 (분당/일일 요청 수 제한 있음).
-    (gemini-2.0-flash는 2026-06-01자로 셧다운되어 더 이상 사용 불가 — gemini-3.5-flash로 대체.)
-
-실행:
     python crew_alert_agent.py
-
-cron 예시 (etl_risk_pipeline.py 실행 직후):
-    */10 * * * * cd /path/to/project/data_pipeline && venv/bin/python weather_collector.py && venv/bin/python etl_risk_pipeline.py && venv/bin/python crew_alert_agent.py
 """
 
 import os
@@ -53,7 +32,7 @@ DB_CONFIG = {
     "password": os.environ["DB_PASSWORD"],
 }
 
-# 짧은 문장 2개만 생성하는 가벼운 작업이라, 무료 티어인 gemini-3.5-flash를 기본으로 사용.
+# 짧은 문장 2개만 생성하므로 무료 티어인 gemini-3.5-flash 사용.
 llm = LLM(
     model="gemini/gemini-3.5-flash",
     api_key=os.environ["GEMINI_API_KEY"],
@@ -192,7 +171,7 @@ def render_document(alert: dict, admin_sentence: str, citizen_sentence: str) -> 
 
 
 def build_official_sms_text(alert: dict, admin_sentence: str) -> str:
-    """담당 공무원에게 보낼 SMS 문구. 표에 정리된 '행정 조치 문장'을 그대로 전달합니다."""
+    """담당 공무원에게 보낼 SMS 문구."""
     return (
         f"[6PPD-Q 위험도 경보] {alert['tributary']} {alert['road_name']}({alert['gu']}) "
         f"{alert['prev_grade']}->{alert['new_grade']} (위험도 {alert['risk_score']}점)\n{admin_sentence}"

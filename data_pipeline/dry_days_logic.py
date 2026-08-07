@@ -1,16 +1,8 @@
 """
-dry_days_logic.py
-선행 무강우일수(Antecedent Dry Days, ADD) 계산 알고리즘
+선행 무강우일수(Antecedent Dry Days) 계산.
 
-정의: 특정 날짜 기준으로, "무강우 기준치(threshold_mm)" 미만의 비가 내린 날이 연속으로
-      며칠째 이어지고 있는지 계산합니다. 기준치 이상 비가 온 날은 카운트가 0으로 리셋됩니다.
-
-실행 모드:
     python dry_days_logic.py backfill [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
-        -> weather_raw에 쌓인 과거 데이터를 처음부터(또는 지정 구간) 역산하여
-           dry_days_status 테이블을 전체 재계산합니다.
-    python dry_days_logic.py daily
-        -> 어제 하루치만 반영하여 카운터를 1건 갱신합니다. (cron으로 매일 00:10 실행 권장)
+    python dry_days_logic.py daily   # 어제 하루치만 갱신, cron 00:10 권장
 """
 
 import os
@@ -36,15 +28,15 @@ DB_CONFIG = {
     "password": os.environ["DB_PASSWORD"],
 }
 
-# .env에 값이 있으면 그 값을, 없으면 문자열 "1.0" 을 가져온다.
 DRY_DAY_THRESHOLD_MM = float(os.environ.get("DRY_DAY_THRESHOLD_MM", "1.0"))
 
 
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
-"""weather_raw의 시간당 강수량(rn1_mm)을 날짜별로 합산"""
+
 def fetch_daily_precip(cur, nx: int, ny: int, start_date: date, end_date: date) -> List[Tuple[date, float]]:
+    """weather_raw의 시간당 강수량을 날짜별로 합산."""
     cur.execute(
         """
         SELECT obs_datetime::date AS obs_date, COALESCE(SUM(rn1_mm), 0) AS daily_mm
@@ -58,21 +50,20 @@ def fetch_daily_precip(cur, nx: int, ny: int, start_date: date, end_date: date) 
     )
     return cur.fetchall()
 
-"""날짜순으로 정렬된 (date, daily_mm) 리스트를 받아 각 날짜별 선행 무강우일수를 계산."""
 def calculate_antecedent_dry_days(
     daily_rows: List[Tuple[date, float]], threshold_mm: float, carry_in: int = 0
 ) -> List[Tuple[date, float, bool, int]]:
-    
+    """날짜순 (date, daily_mm) 리스트로부터 날짜별 선행 무강우일수를 계산. carry_in은 구간 이전까지의 누적값."""
     result = []
-    running = carry_in # carry_in: 시작일 이전까지 이미 누적된 무강우일수
+    running = carry_in
     for obs_date, daily_mm in daily_rows:
         daily_mm = float(daily_mm)
-        is_dry = daily_mm < threshold_mm # threshold_mm : 기준 강수량
+        is_dry = daily_mm < threshold_mm
         running = running + 1 if is_dry else 0
         result.append((obs_date, daily_mm, is_dry, running))
     return result
 
-"""여러 행을 한 번에 저장"""
+
 def upsert_dry_days(cur, nx: int, ny: int, rows: List[Tuple[date, float, bool, int]]) -> None:
     sql = """
         INSERT INTO dry_days_status (obs_date, nx, ny, daily_precip_mm, is_dry_day, antecedent_dry_days)
@@ -87,8 +78,9 @@ def upsert_dry_days(cur, nx: int, ny: int, rows: List[Tuple[date, float, bool, i
     values = [(obs_date, nx, ny, daily_mm, is_dry, add) for obs_date, daily_mm, is_dry, add in rows]
     psycopg2.extras.execute_values(cur, sql, values)
 
-"""start_date 직전 날짜의 누적 무강우일수를 조회 (구간 앞쪽 연속성 유지용). 없으면 0."""
+
 def get_carry_in(cur, nx: int, ny: int, before_date: date) -> int:
+    """start_date 직전 날짜의 누적 무강우일수 조회 (구간 앞쪽 연속성 유지). 없으면 0."""
     cur.execute(
         """
         SELECT antecedent_dry_days FROM dry_days_status
@@ -105,11 +97,10 @@ def run_backfill(nx: int, ny: int, start_date: Optional[date], end_date: Optiona
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
-            
-            if end_date is None: # 끝 지점 안 정해졌을 경우
+            if end_date is None:
                 end_date = date.today() - timedelta(days=1)
 
-            if start_date is None: # 시작 지점 안 정해졌을 경우
+            if start_date is None:
                 cur.execute(
                     "SELECT MIN(obs_datetime::date) FROM weather_raw WHERE nx=%s AND ny=%s", (nx, ny)
                 )
@@ -141,19 +132,15 @@ def run_backfill(nx: int, ny: int, start_date: Optional[date], end_date: Optiona
     finally:
         conn.close()
 
-"""하루 실행용 간편 버전"""
+
 def run_daily(nx: int, ny: int):
     target_date = date.today() - timedelta(days=1)
     run_backfill(nx, ny, target_date, target_date)
 
 
 def get_all_road_grid_points() -> List[Tuple[int, int]]:
-    """
-    road_master에 지오코딩된 도로들이 흩어져 있는 서로 다른 모든 격자(nx, ny) 목록을 반환합니다.
-    도로마다 위치(격자)가 다르므로, 무강우일수도 각 도로의 격자별로 따로 계산해야
-    etl_risk_pipeline.py가 모든 도로에 대해 값을 찾을 수 있습니다.
-    road_master가 비어 있으면 빈 리스트를 반환합니다 (호출부에서 --nx/--ny 폴백 처리).
-    """
+    """도로별로 격자(nx, ny)가 다르므로, road_master에 있는 모든 고유 격자 목록을 반환.
+    비어 있으면 빈 리스트 (호출부에서 --nx/--ny로 폴백)."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -164,7 +151,7 @@ def get_all_road_grid_points() -> List[Tuple[int, int]]:
     finally:
         conn.close()
 
-"""실행부"""
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="선행 무강우일수(ADD) 계산")
     parser.add_argument("mode", choices=["backfill", "daily"])

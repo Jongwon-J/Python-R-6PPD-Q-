@@ -20,6 +20,8 @@
     --safe-bg: #E3F3F0;
     --watch: #C98A1F;
     --watch-bg: #FBF0DC;
+    --alert: #A24B2E;
+    --alert-bg: #FBE3DC;
     --danger: #B23A32;
     --danger-bg: #F7E4E1;
     --radius: 14px;
@@ -78,9 +80,10 @@
   .snap-card .snap-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
   .snap-card .snap-score { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; }
   .snap-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; margin-top: 6px; }
-  .snap-badge.safe { background: var(--safe-bg); color: var(--safe); }
-  .snap-badge.watch { background: var(--watch-bg); color: var(--watch); }
-  .snap-badge.danger { background: var(--danger-bg); color: var(--danger); }
+  .snap-badge.관심 { background: var(--safe-bg); color: var(--safe); }
+  .snap-badge.주의 { background: var(--watch-bg); color: var(--watch); }
+  .snap-badge.경계 { background: var(--alert-bg); color: var(--alert); }
+  .snap-badge.심각 { background: var(--danger-bg); color: var(--danger); }
   .snapshot-note { text-align: center; font-size: 12.5px; color: var(--ink-soft); margin-top: 14px; }
 
   /* features */
@@ -189,7 +192,7 @@
       <div class="feature-card">
         <div class="feature-icon">🗺️</div>
         <h3>실시간 위험도 지도</h3>
-        <p>도로별 위험도를 안전·주의·위험 3단계 색상으로 한눈에 확인해요.</p>
+        <p>도로별 위험도를 관심·주의·경계·심각 4단계 색상으로 한눈에 확인해요.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📷</div>
@@ -197,9 +200,9 @@
         <p>현장에서 이상 징후를 발견하면 사진과 위치를 바로 제보할 수 있어요.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🔔</div>
-        <h3>관심 도로 구독</h3>
-        <p>관심 있는 도로를 등록하면 위험도가 오를 때 알림이 전달돼요.</p>
+        <div class="feature-icon">🔄</div>
+        <h3>실시간 자동 갱신</h3>
+        <p>1분마다 최신 위험도로 자동 갱신돼서 새로고침 없이 확인할 수 있어요.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📄</div>
@@ -225,30 +228,25 @@
     : window.location.origin;
 
   const MOCK_ROADS = [
-    { road_id: '8902208', road_name: '남부순환로', risk_score: 78.1 },
-    { road_id: '8901921', road_name: '테헤란로', risk_score: 59.5 },
-    { road_id: '1092198', road_name: '언주로', risk_score: 48.6 },
+    { road_id: '8902208', road_name: '남부순환로', risk_score: 78.1, risk_grade: '심각' },
+    { road_id: '8901921', road_name: '테헤란로', risk_score: 59.5, risk_grade: '심각' },
+    { road_id: '1092198', road_name: '언주로', risk_score: 48.6, risk_grade: '경계' },
   ];
 
-  function riskLevel(score) {
-    if (score >= 67) return 'danger';
-    if (score >= 34) return 'watch';
-    return 'safe';
-  }
-  function riskLabel(level) { return { safe: '안전', watch: '주의', danger: '위험' }[level]; }
-
+  // 등급은 백엔드(risk_formula.classify_risk_grade)가 계산한 값을 그대로 씀 — 프론트에서
+  // 점수만 보고 다시 나누지 않음(4단계 경계값과 어긋나는 걸 방지).
   function renderSnapshot(roads, isSample) {
     const top3 = [...roads].sort((a, b) => b.risk_score - a.risk_score).slice(0, 3);
     const grid = document.getElementById('snapshotGrid');
     grid.innerHTML = '';
     top3.forEach((r) => {
-      const level = riskLevel(r.risk_score);
+      const grade = r.risk_grade || '관심';
       const card = document.createElement('div');
       card.className = 'snap-card';
       card.innerHTML = `
         <div class="snap-name">${r.road_name}</div>
         <div class="snap-score">${Number(r.risk_score).toFixed(1)}</div>
-        <span class="snap-badge ${level}">${riskLabel(level)}</span>
+        <span class="snap-badge ${grade}">${grade}</span>
       `;
       grid.appendChild(card);
     });

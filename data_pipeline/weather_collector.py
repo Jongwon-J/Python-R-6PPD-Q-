@@ -1,20 +1,18 @@
-import os # 환경변수 읽을 때 사용
+import os
 import sys
 import json
 import time
 import math
-import logging # 로그 남기기
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict
 
-import requests # 외부 API에 HTTP 요청 보내기
-import psycopg2 # python에서 PostgreSQL과 통신
-from dotenv import load_dotenv # .env 파일 내용 읽어서 환경 변수로 등록
+import requests
+import psycopg2
+from dotenv import load_dotenv
 
-# .env 파일에 있는 비밀번호, 인증키들을 기억장치에 등록
 load_dotenv()
 
-# "로그를 어떤 모양으로 찍을지" 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("weather_collector")
 
@@ -33,7 +31,6 @@ TANCHEON_POINTS = {
 }
 TARGET_POINT = os.environ.get("TANCHEON_TARGET_POINT", "midstream")
 
-# DB 접속 정보
 DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "localhost"),
     "port": os.environ.get("DB_PORT", "5432"),
@@ -42,9 +39,8 @@ DB_CONFIG = {
     "password": os.environ["DB_PASSWORD"],
 }
 
-# 위,경도 -> 기상청 LCC DFS 격자좌표(nx, ny) 변환하는 함수
-def dfs_xy_conv(lat: float, lon: float) -> Tuple[int, int]: # 격좌좌표 변환 함수
-    
+def dfs_xy_conv(lat: float, lon: float) -> Tuple[int, int]:
+    """위,경도를 기상청 LCC DFS 격자좌표(nx, ny)로 변환."""
     RE = 6371.00877     # 지구 반경(km)
     GRID = 5.0            # 격자 간격(km)
     SLAT1, SLAT2 = 30.0, 60.0    # 투영 위도 1, 2 (degree)
@@ -56,8 +52,7 @@ def dfs_xy_conv(lat: float, lon: float) -> Tuple[int, int]: # 격좌좌표 변�
     slat1, slat2 = SLAT1 * DEGRAD, SLAT2 * DEGRAD
     olon, olat = OLON * DEGRAD, OLAT * DEGRAD
 
-    # 원뿔도법(원추도법) 지도 투영에 쓰이는 중간 계산값
-    # 지도를 평면에 펼 때 왜곡을 보정하는 계산
+    # 원뿔도법 투영 보정을 위한 중간 계산값
     sn = math.tan(math.pi * 0.25 + slat2 * 0.5) / math.tan(math.pi * 0.25 + slat1 * 0.5)
     sn = math.log(math.cos(slat1) / math.cos(slat2)) / math.log(sn)
     sf = math.tan(math.pi * 0.25 + slat1 * 0.5)
@@ -78,19 +73,16 @@ def dfs_xy_conv(lat: float, lon: float) -> Tuple[int, int]: # 격좌좌표 변�
     y = math.floor(ro - ra * math.cos(theta) + YO + 0.5)
     return int(x), int(y)
 
-# API에 물어볼 시각 계산하는 함수
 def get_base_datetime(now: Optional[datetime] = None) -> Tuple[str, str, datetime]:
-
+    """기상청 초단기실황은 매시 10분에 발표되므로, 10분 이전이면 직전 시각 자료를 요청."""
     now = now or datetime.now()
-    # 지금 분이 10분 미만 -> 1시간 빼기 else 그대로 두기
     base_dt = now - timedelta(hours=1) if now.minute < 10 else now
     base_dt = base_dt.replace(minute=0, second=0, microsecond=0)
     return base_dt.strftime("%Y%m%d"), base_dt.strftime("%H%M"), base_dt
 
-# 초단기실황조회 API 호출하는 함수
 def fetch_ultra_srt_ncst(nx: int, ny: int, base_date: str, base_time: str,
                           retries: int = 3, backoff_sec: float = 2.0) -> Dict[str, str]:
-    
+    """초단기실황조회 API 호출, 실패 시 backoff 후 재시도."""
     params = {
         "serviceKey": SERVICE_KEY,
         "pageNo": "1",

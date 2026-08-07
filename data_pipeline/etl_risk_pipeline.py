@@ -1,19 +1,11 @@
 """
-etl_risk_pipeline.py - 3주차 핵심 산출물
-weather_raw + dry_days_status + road_master를 (nx, ny) 격자 기준으로 조인해서,
-도로별 위험도를 risk_formula.py로 계산한 뒤 processed_risk_log에 적재하는 배치 스크립트.
+weather_raw + dry_days_status + road_master를 (nx, ny) 격자로 조인해 도로별 위험도를
+계산하고 processed_risk_log에 적재하는 배치 스크립트.
 
-실행:
     python etl_risk_pipeline.py
 
-cron 예시 (10분마다, weather_collector.py 실행 직후):
-    */10 * * * * cd /path/to/project/data_pipeline && venv/bin/python weather_collector.py && venv/bin/python etl_risk_pipeline.py
-
-[핵심 로직 - 강우 이벤트 판정]
-risk_formula.py의 rainfall_trigger()는 "강우가 시작된 지 몇 시간째이고 그동안 몇 mm가
-누적됐는지"를 미리 계산해서 받는다는 전제로 만들어졌습니다 (risk_formula.py 문서 참고).
-weather_raw에는 매시간 강수량(rn1_mm)만 있고 "언제부터 연속으로 비가 왔는지"는 없기 때문에,
-get_rain_event_state()에서 이 판정 로직을 직접 구현합니다.
+risk_formula.rainfall_trigger()는 "강우 시작 후 몇 시간, 누적 몇 mm"를 받는다는 전제라,
+weather_raw의 매시간 강수량만으로 그 연속 구간을 판정하는 로직을 get_rain_event_state()에 구현.
 """
 
 import os
@@ -59,8 +51,7 @@ def get_aadt_sample_range(cur) -> Tuple[float, float]:
 
 
 def get_impervious_sample_range(cur) -> Tuple[float, float]:
-    """road_master 표본 내 불투수면비율 최소/최대값 (정규화 기준).
-    불투수면 정규화를 값/100 절대 스케일에서 표본 상대 min-max로 바꾸면서 추가됨."""
+    """road_master 표본 내 불투수면비율 최소/최대값 (정규화 기준)."""
     cur.execute("SELECT MIN(impervious_ratio), MAX(impervious_ratio) FROM road_master WHERE impervious_ratio IS NOT NULL")
     row = cur.fetchone()
     return float(row[0]), float(row[1])
@@ -109,7 +100,7 @@ def get_rain_event_state(cur, nx: int, ny: int) -> Tuple[bool, float, float, Opt
         """,
         (nx, ny, datetime.now() - timedelta(hours=RAIN_LOOKBACK_HOURS)),
     )
-    rows = cur.fetchall()  # 최신순 (내림차순)
+    rows = cur.fetchall()
     if not rows:
         logger.warning(f"nx={nx} ny={ny}: 최근 {RAIN_LOOKBACK_HOURS}시간 내 weather_raw 데이터 없음")
         return False, 0.0, 0.0, None, None
@@ -120,16 +111,14 @@ def get_rain_event_state(cur, nx: int, ny: int) -> Tuple[bool, float, float, Opt
     if latest_rn1 <= 0:
         return False, 0.0, 0.0, latest_rn1, latest_dt
 
-    # 최신 시각부터 거슬러 올라가며 "끊기지 않고 이어지는" 강우 구간을 누적
+    # 최신 시각부터 거슬러 올라가며 끊기지 않고 이어지는 강우 구간만 누적
     cumulative_mm = 0.0
     hours = 0
     expected_dt = latest_dt
     for obs_dt, rn1 in rows:
         rn1 = float(rn1) if rn1 is not None else 0.0
-        if obs_dt != expected_dt:
-            break  # 관측 데이터 자체가 비어 있는 시간대 -> 연속 구간 종료
-        if rn1 <= 0:
-            break  # 비가 그친 시점 -> 연속 구간 종료
+        if obs_dt != expected_dt or rn1 <= 0:
+            break
         cumulative_mm += rn1
         hours += 1
         expected_dt = obs_dt - timedelta(hours=1)

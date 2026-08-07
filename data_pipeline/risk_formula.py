@@ -14,11 +14,7 @@ from typing import Optional
 
 
 def normalize_aadt(aadt: float, sample_min: float, sample_max: float) -> float:
-    """
-    AADT를 표본 내 min-max로 0~1 정규화. (값-표본min)/(표본max-표본min)
-    sample_min/sample_max는 그때그때 road_master 표본에서 구해야 하는 값이라 인자로 받습니다
-    (예: SELECT MIN(aadt), MAX(aadt) FROM road_master).
-    """
+    """AADT를 표본 내 min-max로 0~1 정규화."""
     if sample_max <= sample_min:
         return 0.0
     value = (aadt - sample_min) / (sample_max - sample_min)
@@ -32,10 +28,7 @@ def normalize_dry_days(antecedent_dry_days: int, cap_days: int = 7) -> float:
 
 
 def normalize_impervious(impervious_ratio_pct: float, sample_min: float, sample_max: float) -> float:
-    """
-    불투수면비율을 표본 내 min-max로 0~1 정규화. 공식 : (값-표본min)/(표본max-표본min)
-    sample_min/sample_max는 road_master 표본에서 추출
-    """
+    """불투수면비율을 표본 내 min-max로 0~1 정규화."""
     if sample_max <= sample_min:
         return 0.0
     value = (impervious_ratio_pct - sample_min) / (sample_max - sample_min)
@@ -50,13 +43,8 @@ def rainfall_trigger(
     trigger_min_mm: float = 3.0,
     partial_value: float = 0.25,
 ) -> float:
-    """
-    강수 강도 지수.
-      - 비가 전혀 안 오는 상태               -> 0.0   ("강수 없으면 유출지수≈0" 근거)
-      - 강우 시작 후 trigger_window_hours(기본 8h) 이내에
-        누적 trigger_min_mm(기본 3mm) 이상 도달 -> 1.0
-      - 비가 오지만 위 조건 미달              -> 0.2~0.3 (기본값 0.25)
-    """
+    """강수 강도 지수. 안 옴 -> 0.0, 시작 후 trigger_window_hours 내 trigger_min_mm 이상(첫씻김) -> 1.0,
+    비는 오지만 미달 -> partial_value."""
     if not is_raining:
         return 0.0
     if hours_since_rain_start <= trigger_window_hours and cumulative_mm_since_rain_start >= trigger_min_mm:
@@ -65,17 +53,14 @@ def rainfall_trigger(
 
 
 def calculate_load_index(aadt_norm: float, dry_days_norm: float) -> float:
-    """부하지수 = 0.6 * AADT_정규화 + 0.4 * 건조일수_정규화"""
     return 0.6 * aadt_norm + 0.4 * dry_days_norm
 
 
 def calculate_runoff_index(rain_trigger: float, impervious_norm: float) -> float:
-    """유출지수 = 0.7 * 강수트리거 + 0.3 * 불투수면_정규화"""
     return 0.7 * rain_trigger + 0.3 * impervious_norm
 
 
 def calculate_risk_score(load_index: float, runoff_index: float) -> float:
-    """위험도(0~100) = 부하지수 * 유출지수 * 100"""
     return round(load_index * runoff_index * 100, 2)
 
 
@@ -84,15 +69,7 @@ RISK_GRADE_BOUNDARIES = (33.5, 40.5, 49.9)  # (관심/주의 경계, 주의/경�
 
 
 def classify_risk_grade(risk_score: float) -> str:
-    """
-    위험도 점수를 4단계 등급으로 분류.
-        관심 : risk_score <  33.5
-        주의 : 33.5 <= risk_score <  40.5
-        경계 : 40.5 <= risk_score <  49.9
-        심각 : risk_score >= 49.9
-    임계치 트리거 파이프라인(etl_risk_pipeline.py)은 이 등급이 이전 계산값보다 올라갔는지를
-    비교해서 알림을 발생시키는 데 사용합니다.
-    """
+    """위험도 점수를 4단계 등급으로 분류. etl_risk_pipeline.py가 이전 등급과 비교해 알림 트리거에 사용."""
     warn, alert, severe = RISK_GRADE_BOUNDARIES
     if risk_score >= severe:
         return "심각"
@@ -115,10 +92,7 @@ def calculate_full_risk(
     cumulative_mm_since_rain_start: float = 0.0,
     hours_since_rain_start: float = 0.0,
 ) -> dict:
-    """
-    입력 원자값들로부터 정규화 -> 부하지수/유출지수 -> 최종 위험도까지 한 번에 계산.
-    중간값도 함께 반환해서, processed_risk_log에 그대로 저장하거나 디버깅할 때 쓸 수 있게 했습니다.
-    """
+    """정규화 -> 부하지수/유출지수 -> 최종 위험도까지 한 번에 계산. 중간값도 함께 반환."""
     aadt_norm = normalize_aadt(aadt, aadt_sample_min, aadt_sample_max)
     dry_days_norm = normalize_dry_days(antecedent_dry_days)
     rain_trigger_value = rainfall_trigger(is_raining, cumulative_mm_since_rain_start, hours_since_rain_start)
@@ -142,9 +116,7 @@ def calculate_full_risk(
 
 
 if __name__ == "__main__":
-    # 문서 예시로 간단히 자체 검증: 15개 도로 표본(gis_mapping_data.csv) 기준
-    # AADT 표본 범위 11050~57125, 불투수면비율 표본 범위 38.4~70.27
-    # 테헤란로(AADT=40890, 불투수면=57.72)로 계산
+    # 자체 검증: 15개 도로 표본 기준 테헤란로(AADT=40890, 불투수면=57.72)
     print("--- 비가 안 올 때 (위험도는 0에 가까워야 함) ---")
     print(calculate_full_risk(
         aadt=40890, aadt_sample_min=11050, aadt_sample_max=57125,

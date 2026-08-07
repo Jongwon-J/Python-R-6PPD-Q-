@@ -348,7 +348,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .badge.danger { animation: none; }
+    .badge.심각 { animation: none; }
   }
 
   .gauge-meta {
@@ -750,7 +750,11 @@
   </main>
 
 <script>
-  const API_BASE = 'http://127.0.0.1:8000';
+  // 로컬 개발(도커/로컬서버)은 프론트·백엔드가 서로 다른 포트라 8000을 명시하고,
+  // 배포 환경(Render)은 프론트와 백엔드가 같은 origin에서 서비스되므로 그대로 사용.
+  const API_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+    ? 'http://127.0.0.1:8000'
+    : window.location.origin;
 
   const MOCK_ROADS = [
     { road_id: '8902208', road_name: '남부순환로', lat: 37.491879, lon: 127.088069, risk_score: 78.1, risk_grade: '심각', calc_datetime: null },

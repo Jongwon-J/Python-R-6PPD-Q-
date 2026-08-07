@@ -1,9 +1,7 @@
 """
-init_db.py - 설계도를 실제로 실행하는 스크립트: schema.sql을 실행하여 PostgreSQL에 초기 테이블을 생성합니다.
+init_db.py - schema.sql을 실행해 PostgreSQL에 초기 테이블을 생성.
 
-사용법:
     python init_db.py
-
 """
 
 import os

@@ -112,17 +112,12 @@ CREATE INDEX IF NOT EXISTS idx_citizen_reports_reported_at ON citizen_reports (r
 CREATE INDEX IF NOT EXISTS idx_citizen_reports_status ON citizen_reports (status);
 
 -- ----------------------------------------------------------------------------
--- 6) subscriptions : 관심 도로/하천 알림 구독
+-- 6) subscriptions : (제거됨, 6주차)
+--    시민 대상 알림이 공무원 대상 SMS(고정 담당자 번호)로 역할이 바뀌면서 목적을 잃어
+--    앱 코드(models.py, schemas.py, 라우터)에서는 이미 제거됨. 이 DROP은 schema.sql을
+--    다시 실행했을 때(기존 DB) 남아있던 테이블까지 함께 정리하기 위한 것.
 -- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS subscriptions (
-    id              BIGSERIAL PRIMARY KEY,
-    contact         VARCHAR(100) NOT NULL,      -- 전화번호 또는 이메일
-    road_id         VARCHAR(50) NOT NULL REFERENCES road_master(road_id),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (contact, road_id)                   -- 같은 연락처가 같은 도로를 중복 구독하지 못하게
-);
-
-CREATE INDEX IF NOT EXISTS idx_subscriptions_road_id ON subscriptions (road_id);
+DROP TABLE IF EXISTS subscriptions;
 
 -- ----------------------------------------------------------------------------
 -- 7) risk_alert_log : 위험도 등급이 상승(임계치 도달)한 순간을 기록하는 트리거 로그

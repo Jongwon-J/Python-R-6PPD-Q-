@@ -78,9 +78,10 @@
   .snap-card .snap-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
   .snap-card .snap-score { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; }
   .snap-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; margin-top: 6px; }
-  .snap-badge.safe { background: var(--safe-bg); color: var(--safe); }
-  .snap-badge.watch { background: var(--watch-bg); color: var(--watch); }
-  .snap-badge.danger { background: var(--danger-bg); color: var(--danger); }
+  .snap-badge.관심 { background: var(--safe-bg); color: var(--safe); }
+  .snap-badge.주의 { background: var(--watch-bg); color: var(--watch); }
+  .snap-badge.경계 { background: #FBE3DC; color: #A24B2E; }
+  .snap-badge.심각 { background: var(--danger-bg); color: var(--danger); }
   .snapshot-note { text-align: center; font-size: 12.5px; color: var(--ink-soft); margin-top: 14px; }
 
   /* features */
@@ -189,7 +190,7 @@
       <div class="feature-card">
         <div class="feature-icon">🗺️</div>
         <h3>실시간 위험도 지도</h3>
-        <p>도로별 위험도를 안전·주의·위험 3단계 색상으로 한눈에 확인해요.</p>
+        <p>도로별 위험도를 관심·주의·경계·심각 4단계 색상으로 한눈에 확인해요.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📷</div>
@@ -197,9 +198,9 @@
         <p>현장에서 이상 징후를 발견하면 사진과 위치를 바로 제보할 수 있어요.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🔔</div>
-        <h3>관심 도로 구독</h3>
-        <p>관심 있는 도로를 등록하면 위험도가 오를 때 알림이 전달돼요.</p>
+        <div class="feature-icon">🔄</div>
+        <h3>실시간 자동 갱신</h3>
+        <p>1분마다 최신 기상·교통 데이터를 반영해 위험도가 자동으로 업데이트돼요.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📄</div>
@@ -220,33 +221,30 @@
   </footer>
 
 <script>
-  const API_BASE = 'http://127.0.0.1:8000';
+  // 로컬 개발(도커/로컬서버)은 프론트·백엔드가 서로 다른 포트라 8000을 명시하고,
+  // 배포 환경(Render)은 프론트와 백엔드가 같은 origin에서 서비스되므로 그대로 사용.
+  const API_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+    ? 'http://127.0.0.1:8000'
+    : window.location.origin;
 
   const MOCK_ROADS = [
-    { road_id: '8902208', road_name: '남부순환로', risk_score: 78.1 },
-    { road_id: '8901921', road_name: '테헤란로', risk_score: 59.5 },
-    { road_id: '1092198', road_name: '언주로', risk_score: 48.6 },
+    { road_id: '8902208', road_name: '남부순환로', risk_score: 78.1, risk_grade: '심각' },
+    { road_id: '8901921', road_name: '테헤란로', risk_score: 59.5, risk_grade: '심각' },
+    { road_id: '1092198', road_name: '언주로', risk_score: 48.6, risk_grade: '경계' },
   ];
-
-  function riskLevel(score) {
-    if (score >= 67) return 'danger';
-    if (score >= 34) return 'watch';
-    return 'safe';
-  }
-  function riskLabel(level) { return { safe: '안전', watch: '주의', danger: '위험' }[level]; }
 
   function renderSnapshot(roads, isSample) {
     const top3 = [...roads].sort((a, b) => b.risk_score - a.risk_score).slice(0, 3);
     const grid = document.getElementById('snapshotGrid');
     grid.innerHTML = '';
     top3.forEach((r) => {
-      const level = riskLevel(r.risk_score);
+      const level = r.risk_grade || '관심';
       const card = document.createElement('div');
       card.className = 'snap-card';
       card.innerHTML = `
         <div class="snap-name">${r.road_name}</div>
         <div class="snap-score">${Number(r.risk_score).toFixed(1)}</div>
-        <span class="snap-badge ${level}">${riskLabel(level)}</span>
+        <span class="snap-badge ${level}">${level}</span>
       `;
       grid.appendChild(card);
     });
